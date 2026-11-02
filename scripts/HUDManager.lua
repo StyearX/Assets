@@ -39,6 +39,13 @@ local Constants = {
 	MapInterval = 0.2,
 	RepeatDelay = 0.4,
 	RepeatInterval = 0.06,
+	ViewportMargin = 6,
+	DockCollapsed = 44,
+	DockExpanded = 156,
+	DockHold = 2.5,
+	DockLeave = 0.35,
+	DockSpeed = 18,
+	LockAttribute = "Locked",
 	FormatVersion = 2,
 	LegacyFolder = "PerfectUIManager_Configs",
 	NudgeSteps = { 1, 5, 10, 25 },
@@ -64,6 +71,7 @@ local Constants = {
 		Right = "lucide:arrow-right",
 		Launcher = "lucide:layout-dashboard",
 		Focus = "lucide:crosshair",
+		Grip = "lucide:grip-horizontal",
 	},
 	Glyphs = {
 		Edit = "E",
@@ -87,6 +95,7 @@ local Constants = {
 		Right = ">",
 		Launcher = "H",
 		Focus = "O",
+		Grip = "...",
 	},
 }
 
@@ -218,7 +227,39 @@ end
 
 function Util.GetViewport()
 	local Camera = Workspace.CurrentCamera
-	return if Camera then Camera.ViewportSize else Vector2.new(1280, 720)
+	return if Camera then Camera.ViewportSize else Vector2.new(1920, 1080)
+end
+
+function Util.WatchViewport(Callback)
+	local CameraLink = nil
+
+	local function Bind()
+		if CameraLink then
+			CameraLink:Disconnect()
+			CameraLink = nil
+		end
+
+		local Camera = Workspace.CurrentCamera
+		if Camera then
+			CameraLink = Camera:GetPropertyChangedSignal("ViewportSize"):Connect(Callback)
+		end
+	end
+
+	local SwapLink = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		Bind()
+		Callback()
+	end)
+
+	Bind()
+
+	return function()
+		SwapLink:Disconnect()
+
+		if CameraLink then
+			CameraLink:Disconnect()
+			CameraLink = nil
+		end
+	end
 end
 
 function Util.PointInGui(Point, Gui)
@@ -365,6 +406,17 @@ function Geometry.ScreenPosition(Gui)
 	return Gui.AbsolutePosition
 end
 
+function Geometry.ContainsInput(Gui, Position)
+	local Point = Vector2.new(Position.X, Position.Y) + Geometry.Inset()
+	local Origin = Geometry.ScreenPosition(Gui)
+	local Size = Gui.AbsoluteSize
+
+	return Point.X >= Origin.X
+		and Point.X <= Origin.X + Size.X
+		and Point.Y >= Origin.Y
+		and Point.Y <= Origin.Y + Size.Y
+end
+
 local RuleBook = {}
 RuleBook.__index = RuleBook
 
@@ -375,6 +427,7 @@ function RuleBook.new()
 		Tracked = setmetatable({}, { __mode = "k" }),
 		Hidden = setmetatable({}, { __mode = "k" }),
 		Baked = setmetatable({}, { __mode = "k" }),
+		External = setmetatable({}, { __mode = "k" }),
 		Changed = Signal.new(),
 	}, RuleBook)
 end
@@ -417,18 +470,20 @@ function RuleBook:Ensure(Object, Key)
 	return Rule
 end
 
-function RuleBook:Apply(Object, Key, Dragging)
+function RuleBook:Apply(Object, Key, Dragging, Yielding)
 	local Rule = self.Rules[Key]
 	if not Rule or not Object.Parent then
-		return
+		return nil
 	end
 
 	if Rule.IsDeleted then
+		self.External[Object] = nil
+
 		if Object.Visible then
 			self.Hidden[Object] = true
 			Object.Visible = false
 		end
-		return
+		return nil
 	end
 
 	if self.Hidden[Object] then
@@ -437,7 +492,23 @@ function RuleBook:Apply(Object, Key, Dragging)
 	end
 
 	if Dragging then
-		return
+		self.External[Object] = nil
+		return nil
+	end
+
+	if Yielding then
+		if Object.Position ~= Rule.Position then
+			self.External[Object] = true
+		end
+		return nil
+	end
+
+	if self.External[Object] then
+		self.External[Object] = nil
+
+		if Object.Position ~= Rule.Position then
+			return "Adopt"
+		end
 	end
 
 	if Object.Position ~= Rule.Position then
@@ -447,6 +518,8 @@ function RuleBook:Apply(Object, Key, Dragging)
 	if Rule.SizeModified and Object.Size ~= Rule.Size then
 		Object.Size = Rule.Size
 	end
+
+	return nil
 end
 
 function RuleBook:Release(Key)
@@ -469,6 +542,7 @@ function RuleBook:Release(Key)
 			end
 
 			self.Hidden[Object] = nil
+			self.External[Object] = nil
 			self.Tracked[Object] = nil
 		end
 	end
@@ -1148,6 +1222,7 @@ function Kit.Button(Config)
 		Name = "Hit",
 		Text = "",
 		AutoButtonColor = false,
+		ClipsDescendants = Config.Clip == true,
 		Size = UDim2.fromScale(1, 1),
 		ThemeTag = { BackgroundColor3 = Style.Background },
 		Parent = Root,
@@ -1170,7 +1245,7 @@ function Kit.Button(Config)
 			Padding = UDim.new(0, Config.Gap or 8),
 		}),
 		Kit.New("UIPadding", {
-			PaddingLeft = UDim.new(0, if Aligned then 10 else 0),
+			PaddingLeft = UDim.new(0, if Aligned then (Config.Inset or 10) else 0),
 		}),
 	})
 
@@ -1209,7 +1284,11 @@ function Kit.Button(Config)
 		Icon = Icon,
 		Style = Style,
 		Enabled = true,
+		Fade = 0,
+		Reveal = if Config.Concealed then 0 else 1,
 	}, ButtonObject)
+
+	Object:Dim()
 
 	Hit.MouseEnter:Connect(function()
 		if Object.Enabled then
@@ -1305,17 +1384,29 @@ function ButtonObject:SetIcon(Name, Fallback)
 	end
 end
 
-function ButtonObject:SetEnabled(Enabled)
-	self.Enabled = Enabled
-	local Fade = if Enabled then 0 else 0.6
-
+function ButtonObject:Dim()
 	if self.Label then
-		self.Label.TextTransparency = Fade
+		self.Label.TextTransparency = 1 - (1 - self.Fade) * self.Reveal
+	end
+end
+
+function ButtonObject:SetReveal(Alpha)
+	if self.Reveal == Alpha then
+		return
 	end
 
+	self.Reveal = Alpha
+	self:Dim()
+end
+
+function ButtonObject:SetEnabled(Enabled)
+	self.Enabled = Enabled
+	self.Fade = if Enabled then 0 else 0.6
+	self:Dim()
+
 	if self.Icon then
-		self.Icon.Image.ImageTransparency = Fade
-		self.Icon.Glyph.TextTransparency = Fade
+		self.Icon.Image.ImageTransparency = self.Fade
+		self.Icon.Glyph.TextTransparency = self.Fade
 	end
 end
 
@@ -1324,6 +1415,12 @@ function Kit.MakeDraggable(Handle, Target, Config)
 
 	local State = { Input = nil, Origin = Vector3.zero, Start = UDim2.new(), Moved = false, Active = false }
 	local Links = {}
+
+	local function Mark(Value)
+		if Config.Track then
+			Config.Track.Moving = Value
+		end
+	end
 
 	table.insert(
 		Links,
@@ -1337,6 +1434,7 @@ function Kit.MakeDraggable(Handle, Target, Config)
 			State.Start = Target.Position
 			State.Moved = false
 			State.Active = not (Config.IsLocked and Config.IsLocked())
+			Mark(false)
 		end)
 	)
 
@@ -1356,11 +1454,15 @@ function Kit.MakeDraggable(Handle, Target, Config)
 			end
 
 			local Delta = Input.Position - State.Origin
-			if not State.Moved and Vector2.new(Delta.X, Delta.Y).Magnitude < Constants.TapThreshold then
-				return
-			end
+			if not State.Moved then
+				if Vector2.new(Delta.X, Delta.Y).Magnitude < Constants.TapThreshold then
+					return
+				end
 
-			State.Moved = true
+				State.Moved = true
+				State.Start = Target.Position
+				Mark(true)
+			end
 
 			if State.Active then
 				Target.Position = UDim2.new(
@@ -1389,6 +1491,7 @@ function Kit.MakeDraggable(Handle, Target, Config)
 
 			local Moved = State.Moved
 			State.Input = nil
+			Mark(false)
 
 			if Config.OnEnd then
 				Config.OnEnd(Moved)
@@ -1403,8 +1506,66 @@ function Kit.MakeDraggable(Handle, Target, Config)
 	end
 end
 
+function Kit.Contain(Shell, Viewport)
+	local Size = Shell.AbsoluteSize
+	if Size.X <= 0 or Size.Y <= 0 then
+		return
+	end
+
+	local Margin = Constants.ViewportMargin
+	local Position = Shell.AbsolutePosition
+	local MaxX = math.max(Margin, Viewport.X - Size.X - Margin)
+	local MaxY = math.max(Margin, Viewport.Y - Size.Y - Margin)
+	local DeltaX = math.round(math.clamp(Position.X, Margin, MaxX) - Position.X)
+	local DeltaY = math.round(math.clamp(Position.Y, Margin, MaxY) - Position.Y)
+
+	if DeltaX == 0 and DeltaY == 0 then
+		return
+	end
+
+	local Current = Shell.Position
+	Shell.Position = UDim2.new(
+		Current.X.Scale,
+		Current.X.Offset + DeltaX,
+		Current.Y.Scale,
+		Current.Y.Offset + DeltaY
+	)
+end
+
+function Kit.Host(Parent, Title, Order, Scroll)
+	local Components = Kit.Library.Internals.Components
+
+	local Holder = Components.Section(Title, Parent, {
+		LayoutOrder = Order,
+		InModal = true,
+	})
+
+	local Host = {
+		Type = "Tab",
+		Name = "HUDManager",
+		Container = Holder.Container,
+		Library = Kit.Library,
+	}
+
+	function Host:GetHolder()
+		return Holder
+	end
+
+	function Host:NextOrder()
+		return Holder:NextOrder()
+	end
+
+	return Components.SectionApi(Holder, Host, Scroll), Holder
+end
+
 local Overlay = {}
 Overlay.__index = Overlay
+
+function Overlay.Configure(Layer)
+	Layer.IgnoreGuiInset = true
+	Layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	return Layer
+end
 
 function Overlay.new(Core)
 	local Library = Core.Library
@@ -1417,10 +1578,19 @@ function Overlay.new(Core)
 		Releases = {},
 		ClusterBoxes = {},
 		Controls = {},
+		Hosts = {},
+		OptionIds = {},
+		DockButtons = {},
+		DockProgress = 0,
+		DockHold = 0,
+		DockHover = false,
+		DockPress = nil,
+		DockLeft = false,
+		DockTrack = { Moving = false },
 	}, Overlay)
 
-	Self.ShieldLayer = Library:CreateLayer(Constants.ShieldLayer, Constants.ShieldOrder)
-	Self.Layer = Library:CreateLayer(Constants.OverlayLayer, Constants.OverlayOrder)
+	Self.ShieldLayer = Overlay.Configure(Library:CreateLayer(Constants.ShieldLayer, Constants.ShieldOrder))
+	Self.Layer = Overlay.Configure(Library:CreateLayer(Constants.OverlayLayer, Constants.OverlayOrder))
 
 	Self:BuildShield()
 	Self:BuildSelection()
@@ -1428,8 +1598,17 @@ function Overlay.new(Core)
 	Self:BuildDock()
 	Self:BuildActionBar()
 	Self:BuildAdvanced()
+	Self.Panels = { Self.Launcher, Self.Dock, Self.ActionBar, Self.Advanced }
 	Self:SetResizeStep(Core.Settings.ResizeStep)
 	Self:SetSelection(nil)
+	Self:WatchDock()
+
+	table.insert(
+		Self.Releases,
+		Util.WatchViewport(function()
+			Self:OnViewport()
+		end)
+	)
 
 	return Self
 end
@@ -1530,7 +1709,33 @@ function Overlay:PlaceBox(Box, Object)
 	end
 end
 
+function Overlay:FitAdvanced(Viewport)
+	if not self.Advanced.Visible then
+		return
+	end
+
+	local Limit = math.max(120, Viewport.Y - 110)
+	local Height = math.ceil(math.min(self.PagesBody.AbsoluteSize.Y, Limit))
+
+	if Height > 0 and self.Scroll.Size.Y.Offset ~= Height then
+		self.Scroll.Size = UDim2.new(1, 0, 0, Height)
+	end
+end
+
+function Overlay:Contain()
+	local Viewport = Util.GetViewport()
+	self:FitAdvanced(Viewport)
+
+	for _, Shell in self.Panels do
+		if Shell.Visible then
+			Kit.Contain(Shell, Viewport)
+		end
+	end
+end
+
 function Overlay:Reflect(Session)
+	self:Contain()
+
 	local Primary = Session.Selected
 	local Show = Session.EditMode and Primary ~= nil and Primary.Parent ~= nil and Primary.Visible
 
@@ -1569,10 +1774,10 @@ function Overlay:BuildLauncher()
 	local Shell, Fill = Kit.Surface({
 		Name = "Launcher",
 		Parent = self.Layer,
-		Size = UDim2.fromOffset(40, 40),
-		Position = UDim2.new(1, -56, 0.5, -20),
-		Radius = 12,
-		Strength = 0.5,
+		Size = UDim2.fromOffset(36, 36),
+		Position = UDim2.new(1, -52, 0.5, -18),
+		Radius = 8,
+		Strength = 1,
 		ZIndex = 10,
 		Visible = Core.Settings.ShowLauncher,
 	})
@@ -1582,7 +1787,7 @@ function Overlay:BuildLauncher()
 		Parent = Fill,
 		Name = Constants.Icons.Launcher,
 		Fallback = Constants.Glyphs.Launcher,
-		Size = 18,
+		Size = 16,
 	})
 	Icon.Root.AnchorPoint = Vector2.new(0.5, 0.5)
 	Icon.Root.Position = UDim2.fromScale(0.5, 0.5)
@@ -1605,16 +1810,135 @@ function Overlay:BuildDock()
 	local Shell, Fill = Kit.Surface({
 		Name = "Dock",
 		Parent = self.Layer,
-		Size = UDim2.fromOffset(200, 0),
-		Position = UDim2.new(0, 16, 0.5, 0),
+		Size = UDim2.fromOffset(Constants.DockCollapsed, 0),
+		Position = UDim2.new(0, 12, 0.5, 0),
 		AnchorPoint = Vector2.new(0, 0.5),
 		AutoY = true,
-		Radius = 12,
-		Strength = 0.6,
-		ZIndex = 10,
+		Radius = 8,
+		Strength = 1,
+		ZIndex = 12,
 		Visible = false,
 	})
 	self.Dock = Shell
+
+	Kit.New("UIPadding", {
+		PaddingTop = UDim.new(0, 2),
+		PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 6),
+		PaddingRight = UDim.new(0, 6),
+		Parent = Fill,
+	})
+
+	Kit.New("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		Padding = UDim.new(0, 3),
+		Parent = Fill,
+	})
+
+	local Grip = Kit.New("Frame", {
+		Name = "Grip",
+		Size = UDim2.new(1, 0, 0, 16),
+		BackgroundTransparency = 1,
+		ClipsDescendants = true,
+		LayoutOrder = 1,
+		Parent = Fill,
+	})
+
+	local GripIcon = Kit.Icon({
+		Parent = Grip,
+		Name = Constants.Icons.Grip,
+		Fallback = Constants.Glyphs.Grip,
+		Size = 14,
+		Tag = "SubText",
+	})
+	GripIcon.Root.AnchorPoint = Vector2.new(0, 0.5)
+	GripIcon.Root.Position = UDim2.new(0, 9, 0.5, 0)
+
+	self.GripLabel = Kit.Label({
+		Parent = Grip,
+		Text = "HUD Manager",
+		Position = UDim2.fromOffset(32, 0),
+		Size = UDim2.new(1, -32, 1, 0),
+		TextSize = 11,
+		TextTransparency = 1,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Tag = "SubText",
+		Weight = "SemiBold",
+	})
+
+	table.insert(self.Releases, Kit.MakeDraggable(Grip, Shell, { Track = self.DockTrack }))
+
+	local function AddItem(Order, Icon, Fallback, Text)
+		local Button = Kit.Button({
+			Parent = Fill,
+			Icon = Icon,
+			Fallback = Fallback,
+			Text = Text,
+			Variant = "Menu",
+			Align = "Left",
+			Inset = 8,
+			Clip = true,
+			Concealed = true,
+			Size = UDim2.new(1, 0, 0, 32),
+			LayoutOrder = Order,
+		})
+
+		table.insert(self.DockButtons, Button)
+		return Button
+	end
+
+	self.EditButton = AddItem(2, Constants.Icons.Edit, Constants.Glyphs.Edit, "Edit")
+	self.EditButton:OnActivated(function()
+		Core:SetEditMode(not Core.Session.EditMode)
+	end)
+
+	Kit.Divider(Fill, 3, 4)
+
+	self.UndoButton = AddItem(4, Constants.Icons.Undo, Constants.Glyphs.Undo, "Undo")
+	self.UndoButton:OnActivated(function()
+		Core:Undo()
+	end)
+
+	self.RedoButton = AddItem(5, Constants.Icons.Redo, Constants.Glyphs.Redo, "Redo")
+	self.RedoButton:OnActivated(function()
+		Core:Redo()
+	end)
+
+	Kit.Divider(Fill, 6, 4)
+
+	AddItem(7, Constants.Icons.Save, Constants.Glyphs.Save, "Save"):OnActivated(function()
+		Core:QuickSave()
+	end)
+
+	self.AdvancedButton = AddItem(8, Constants.Icons.Advanced, Constants.Glyphs.Advanced, "Advanced")
+	self.AdvancedButton:OnActivated(function()
+		self:ToggleAdvanced()
+	end)
+
+	AddItem(9, Constants.Icons.Settings, Constants.Glyphs.Settings, "Settings"):OnActivated(function()
+		Core:OpenSettings()
+	end)
+
+	self:SetHistoryState(false, false)
+end
+
+function Overlay:BuildActionBar()
+	local Core = self.Core
+
+	local Shell, Fill = Kit.Surface({
+		Name = "ActionBar",
+		Parent = self.Layer,
+		Size = UDim2.fromOffset(292, 0),
+		Position = UDim2.new(0.5, 0, 0, 12),
+		AnchorPoint = Vector2.new(0.5, 0),
+		AutoY = true,
+		Radius = 8,
+		Strength = 1,
+		ZIndex = 11,
+		Visible = false,
+	})
+	self.ActionBar = Shell
 
 	Kit.New("UIPadding", {
 		PaddingTop = UDim.new(0, 4),
@@ -1632,153 +1956,7 @@ function Overlay:BuildDock()
 
 	local Header = Kit.New("Frame", {
 		Name = "Header",
-		Size = UDim2.new(1, 0, 0, 36),
-		BackgroundTransparency = 1,
-		LayoutOrder = 1,
-		Parent = Fill,
-	})
-
-	Kit.Label({
-		Parent = Header,
-		Text = "HUD Manager",
-		Position = UDim2.fromOffset(10, 4),
-		Size = UDim2.new(1, -34, 0, 16),
-		Weight = "SemiBold",
-		TextSize = 13,
-	})
-
-	self.DockStatus = Kit.Label({
-		Parent = Header,
-		Text = "Edit mode off",
-		Position = UDim2.fromOffset(10, 20),
-		Size = UDim2.new(1, -34, 0, 14),
-		TextSize = 11,
-		Tag = "TextSecondary",
-		Weight = "Regular",
-	})
-
-	self.DockDot = Kit.New("Frame", {
-		Name = "StatusDot",
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -12, 0.5, 0),
-		Size = UDim2.fromOffset(8, 8),
-		BorderSizePixel = 0,
-		ThemeTag = { BackgroundColor3 = "SubText" },
-		Parent = Header,
-	}, { Kit.Corner(4) })
-
-	table.insert(self.Releases, Kit.MakeDraggable(Header, Shell))
-
-	Kit.Divider(Fill, 2, 4)
-
-	local function AddItem(Order, Text, Icon, Fallback, Size)
-		return Kit.Button({
-			Parent = Fill,
-			Text = Text,
-			Icon = Icon,
-			Fallback = Fallback,
-			Variant = "Menu",
-			Align = "Left",
-			Size = Size or UDim2.new(1, 0, 0, 30),
-			LayoutOrder = Order,
-		})
-	end
-
-	self.EditButton = AddItem(3, "Edit mode", Constants.Icons.Edit, Constants.Glyphs.Edit)
-	self.EditButton:OnActivated(function()
-		Core:SetEditMode(not Core.Session.EditMode)
-	end)
-
-	local HistoryRow = Kit.New("Frame", {
-		Size = UDim2.new(1, 0, 0, 30),
-		BackgroundTransparency = 1,
-		LayoutOrder = 4,
-		Parent = Fill,
-	}, {
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 2),
-		}),
-	})
-
-	self.UndoButton = Kit.Button({
-		Parent = HistoryRow,
-		Text = "Undo",
-		Icon = Constants.Icons.Undo,
-		Fallback = Constants.Glyphs.Undo,
-		Variant = "Menu",
-		Align = "Left",
-		Size = UDim2.new(0.5, -1, 1, 0),
-		LayoutOrder = 1,
-	})
-	self.UndoButton:OnActivated(function()
-		Core:Undo()
-	end)
-
-	self.RedoButton = Kit.Button({
-		Parent = HistoryRow,
-		Text = "Redo",
-		Icon = Constants.Icons.Redo,
-		Fallback = Constants.Glyphs.Redo,
-		Variant = "Menu",
-		Align = "Left",
-		Size = UDim2.new(0.5, -1, 1, 0),
-		LayoutOrder = 2,
-	})
-	self.RedoButton:OnActivated(function()
-		Core:Redo()
-	end)
-
-	Kit.Divider(Fill, 5, 4)
-
-	local SaveButton = AddItem(6, "Quick save", Constants.Icons.Save, Constants.Glyphs.Save)
-	SaveButton:OnActivated(function()
-		Core:QuickSave()
-	end)
-
-	self.AdvancedButton = AddItem(7, "Advanced", Constants.Icons.Advanced, Constants.Glyphs.Advanced)
-	self.AdvancedButton:OnActivated(function()
-		self:ToggleAdvanced()
-	end)
-
-	self:SetHistoryState(false, false)
-end
-
-function Overlay:BuildActionBar()
-	local Core = self.Core
-
-	local Shell, Fill = Kit.Surface({
-		Name = "ActionBar",
-		Parent = self.Layer,
-		Size = UDim2.fromOffset(292, 0),
-		Position = UDim2.new(0.5, 0, 0.1, 0),
-		AnchorPoint = Vector2.new(0.5, 0),
-		AutoY = true,
-		Radius = 12,
-		Strength = 0.6,
-		ZIndex = 10,
-		Visible = false,
-	})
-	self.ActionBar = Shell
-
-	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 6),
-		PaddingBottom = UDim.new(0, 6),
-		PaddingLeft = UDim.new(0, 6),
-		PaddingRight = UDim.new(0, 6),
-		Parent = Fill,
-	})
-
-	Kit.New("UIListLayout", {
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 2),
-		Parent = Fill,
-	})
-
-	local Header = Kit.New("Frame", {
-		Name = "Header",
-		Size = UDim2.new(1, 0, 0, 30),
+		Size = UDim2.new(1, 0, 0, 24),
 		BackgroundTransparency = 1,
 		LayoutOrder = 1,
 		Parent = Fill,
@@ -1787,8 +1965,8 @@ function Overlay:BuildActionBar()
 	self.SelectionName = Kit.Label({
 		Parent = Header,
 		Text = "Tap an element to select",
-		Position = UDim2.fromOffset(10, 0),
-		Size = UDim2.new(1, -108, 1, 0),
+		Position = UDim2.fromOffset(6, 0),
+		Size = UDim2.new(1, -96, 1, 0),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		Tag = "TextSecondary",
 		Weight = "SemiBold",
@@ -1798,7 +1976,7 @@ function Overlay:BuildActionBar()
 		Parent = Header,
 		Text = "",
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -10, 0, 0),
+		Position = UDim2.new(1, -6, 0, 0),
 		Size = UDim2.new(0, 0, 1, 0),
 		AutomaticSize = Enum.AutomaticSize.X,
 		TextXAlignment = Enum.TextXAlignment.Right,
@@ -1817,12 +1995,10 @@ function Overlay:BuildActionBar()
 		})
 	)
 
-	Kit.Divider(Fill, 2, 4)
-
 	local Row = Kit.New("Frame", {
-		Size = UDim2.new(1, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, 32),
 		BackgroundTransparency = 1,
-		LayoutOrder = 3,
+		LayoutOrder = 2,
 		Parent = Fill,
 	}, {
 		Kit.New("UIListLayout", {
@@ -1840,7 +2016,7 @@ function Overlay:BuildActionBar()
 			Icon = Icon,
 			Fallback = Fallback,
 			Variant = Variant,
-			Size = UDim2.fromOffset(40, 32),
+			Size = UDim2.fromOffset(38, 30),
 			LayoutOrder = Order,
 		})
 
@@ -1865,7 +2041,7 @@ function Overlay:BuildActionBar()
 	self.StepLabel = Kit.Label({
 		Parent = Row,
 		Text = "",
-		Size = UDim2.fromOffset(40, 32),
+		Size = UDim2.fromOffset(38, 30),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextSize = 11,
 		FontFace = MonoFace,
@@ -1897,10 +2073,130 @@ function Overlay:ToggleDock()
 	end
 end
 
+function Overlay:WatchDock()
+	local function Extend()
+		self.DockHold = math.max(self.DockHold, os.clock() + Constants.DockHold)
+	end
+
+	self:Listen(UserInputService.InputBegan, function(Input)
+		if not Util.IsPointer(Input) or not self.Dock.Visible then
+			return
+		end
+
+		if Geometry.ContainsInput(self.Dock, Input.Position) then
+			self.DockPress = Input
+			Extend()
+		end
+	end)
+
+	self:Listen(UserInputService.InputEnded, function(Input)
+		local Press = self.DockPress
+		if not Press then
+			return
+		end
+
+		local Same = Input == Press
+			or (
+				Press.UserInputType == Enum.UserInputType.MouseButton1
+				and Input.UserInputType == Enum.UserInputType.MouseButton1
+			)
+
+		if Same then
+			self.DockPress = nil
+			Extend()
+		end
+	end)
+end
+
+function Overlay:IsDockActive()
+	local Dock = self.Dock
+
+	if not Dock.Visible then
+		self.DockPress = nil
+		self.DockHover = false
+		return false
+	end
+
+	local Now = os.clock()
+	local Hovering = UserInputService.MouseEnabled and Util.PointInGui(UserInputService:GetMouseLocation(), Dock)
+
+	if self.DockHover and not Hovering then
+		self.DockHold = math.max(self.DockHold, Now + Constants.DockLeave)
+	end
+
+	self.DockHover = Hovering
+
+	return Hovering or self.DockPress ~= nil or Now < self.DockHold
+end
+
+function Overlay:ApplyDock(Progress)
+	local Dock = self.Dock
+	local Before = Dock.Size.X.Offset
+	local Span = Constants.DockExpanded - Constants.DockCollapsed
+	local Width = math.round(Constants.DockCollapsed + Span * Progress)
+
+	if Before <= Constants.DockCollapsed then
+		local Center = Dock.AbsolutePosition.X + Dock.AbsoluteSize.X / 2
+		self.DockLeft = Center > Util.GetViewport().X / 2
+	end
+
+	self.DockProgress = Progress
+
+	local Size = Dock.Size
+	Dock.Size = UDim2.new(0, Width, Size.Y.Scale, Size.Y.Offset)
+
+	if self.DockLeft and Width ~= Before and not self.DockTrack.Moving then
+		local Position = Dock.Position
+		Dock.Position = UDim2.new(Position.X.Scale, Position.X.Offset - (Width - Before), Position.Y.Scale, Position.Y.Offset)
+	end
+
+	local Alpha = math.clamp((Progress - 0.3) / 0.7, 0, 1)
+
+	for _, Button in self.DockButtons do
+		Button:SetReveal(Alpha)
+	end
+
+	self.GripLabel.TextTransparency = 1 - Alpha
+end
+
+function Overlay:StepDock(Delta)
+	local Target = if self:IsDockActive() then 1 else 0
+	local Progress = self.DockProgress
+
+	if Progress == Target then
+		return
+	end
+
+	local Config = self.Core.Library.Config
+	local Speed = if type(Config.AnimationSpeed) == "number" then Config.AnimationSpeed else 1
+
+	if Config.ReducedMotion or not self.Dock.Visible then
+		Progress = Target
+	else
+		Progress += (Target - Progress) * (1 - math.exp(-Constants.DockSpeed * Speed * (Delta or 0.016)))
+
+		if math.abs(Target - Progress) < 0.01 then
+			Progress = Target
+		end
+	end
+
+	self:ApplyDock(Progress)
+end
+
+function Overlay:OnViewport()
+	self:Contain()
+
+	local Map = self.Map
+	if Map and Map.Ratio then
+		local Viewport = Util.GetViewport()
+		Map.Ratio.AspectRatio = Viewport.X / math.max(Viewport.Y, 1)
+	end
+end
+
 function Overlay:SetLauncherVisible(Visible)
 	self.Launcher.Visible = Visible
 
-	if not Visible and not self.Core.Session.EditMode then
+	if not Visible then
 		self.Dock.Visible = false
 	end
 end
@@ -1910,8 +2206,6 @@ function Overlay:SetEditState(Enabled)
 	self.Shield.Active = Enabled
 	self.ActionBar.Visible = Enabled
 	self.EditButton:SetVariant(if Enabled then "Active" else "Menu")
-	self.DockStatus.Text = if Enabled then "Tap an element to edit" else "Edit mode off"
-	Kit.Retag(self.DockDot, { BackgroundColor3 = if Enabled then "Success" else "SubText" })
 
 	if not Enabled then
 		self:SetSelection(nil)
@@ -1924,6 +2218,11 @@ function Overlay:SetBarLocked(Locked)
 		if Locked then Constants.Icons.Lock else Constants.Icons.Unlock,
 		if Locked then Constants.Glyphs.Lock else Constants.Glyphs.Unlock
 	)
+
+	local Option = self.Core.Library.Options.HudDockBarLocked
+	if Option and Option.Value ~= Locked then
+		pcall(Option.SetValue, Option, Locked)
+	end
 end
 
 function Overlay:SetHistoryState(CanUndo, CanRedo)
@@ -1957,7 +2256,7 @@ function Overlay:SetSelection(Object)
 	if Valid then
 		local Size = self:FormatSize(Object)
 		self.ReadoutText = Size
-		self.SelectionName.Text = Object.Name
+		self.SelectionName.Text = if self.Core:IsElementLocked(Object) then Object.Name .. " (locked)" else Object.Name
 		self.SelectionSize.Text = Size
 		self.AdvancedSelection.Text = Object.Name .. "  " .. Size
 		Kit.Retag(self.SelectionName, { TextColor3 = "Text" })
@@ -1980,9 +2279,20 @@ function Overlay:Destroy()
 	end
 	table.clear(self.Releases)
 
-	Kit.Release()
+	for _, Holder in self.Hosts do
+		pcall(Holder.Destroy, Holder)
+	end
+	table.clear(self.Hosts)
 
 	local Library = self.Core.Library
+
+	for _, Idx in self.OptionIds do
+		Library.Options[Idx] = nil
+	end
+	table.clear(self.OptionIds)
+
+	Kit.Release()
+
 	pcall(Library.RemoveLayer, Library, Constants.OverlayLayer)
 	pcall(Library.RemoveLayer, Library, Constants.ShieldLayer)
 end
@@ -2035,11 +2345,11 @@ end
 
 local Enforcer = {}
 
-function Enforcer.Step(Core)
+function Enforcer.Step(Core, Delta)
 	local Session = Core.Session
 	Kit.Refresh()
 	Core.Overlay:Reflect(Session)
-	Core.Overlay:Tick()
+	Core.Overlay:Tick(Delta)
 
 	local Book = Core.Book
 	if next(Book.Rules) == nil then
@@ -2054,7 +2364,11 @@ function Enforcer.Step(Core)
 				LayoutBaker.Bake(Book, Object.Parent)
 			end
 
-			Book:Apply(Object, Key, Session.DragSet[Object] == true)
+			local Result = Book:Apply(Object, Key, Session.DragSet[Object] == true, Core:IsYielding(Object))
+
+			if Result == "Adopt" then
+				Core:AdoptPosition(Object, Key)
+			end
 		end
 	end
 end
@@ -2478,18 +2792,23 @@ function Overlay:Hold(Button, Action)
 
 		Action()
 
+		local Release
+		Release = UserInputService.InputEnded:Connect(function(Ended)
+			local Same = Ended == Input
+				or (Input.UserInputType == Enum.UserInputType.MouseButton1 and Ended.UserInputType == Enum.UserInputType.MouseButton1)
+
+			if Same then
+				if Token == Current then
+					Token += 1
+				end
+				Release:Disconnect()
+			end
+		end)
+
 		task.delay(Constants.RepeatDelay, function()
 			while Token == Current and self.Core.Started and Button.Enabled do
 				Action()
 				task.wait(Constants.RepeatInterval)
-			end
-		end)
-
-		local Ended
-		Ended = Input.Changed:Connect(function()
-			if Input.UserInputState == Enum.UserInputState.End then
-				Token += 1
-				Ended:Disconnect()
 			end
 		end)
 	end)
@@ -2519,6 +2838,39 @@ function Overlay:NewPage(Parent, Name)
 	})
 end
 
+function Overlay:BuildHost(Parent, Title, Order, Build)
+	local Success, Problem = pcall(function()
+		local Host, Holder = Kit.Host(Parent, Title, Order, self.Scroll)
+		table.insert(self.Hosts, Holder)
+
+		Kit.New("UIPadding", {
+			PaddingBottom = UDim.new(0, 8),
+			Parent = Holder.Root,
+		})
+
+		Build(Host)
+	end)
+
+	if not Success then
+		warn("HUDManager - " .. tostring(Problem))
+	end
+end
+
+function Overlay:AddOption(Host, Method, Idx, Key, Config)
+	local Core = self.Core
+
+	Config.Default = Core.Settings[Key]
+	Config.Callback = function(Value)
+		Core:SetSetting(Key, Value)
+	end
+
+	local Option = Host[Method](Host, Idx, Config)
+	table.insert(self.OptionIds, Idx)
+	Core:BindOption(Key, Idx)
+
+	return Option
+end
+
 function Overlay:BuildAdvanced()
 	local Core = self.Core
 
@@ -2526,11 +2878,11 @@ function Overlay:BuildAdvanced()
 		Name = "Advanced",
 		Parent = self.Layer,
 		Size = UDim2.fromOffset(340, 0),
-		Position = UDim2.new(0, 232, 0.5, 0),
+		Position = UDim2.new(0, 68, 0.5, 0),
 		AnchorPoint = Vector2.new(0, 0.5),
 		AutoY = true,
-		Radius = 12,
-		Strength = 0.6,
+		Radius = 8,
+		Strength = 1,
 		ZIndex = 10,
 		Visible = false,
 	})
@@ -2594,7 +2946,7 @@ function Overlay:BuildAdvanced()
 		Radius = 7,
 	})
 	Settings:OnActivated(function()
-		Core:ToggleWindow()
+		Core:OpenSettings()
 	end)
 
 	table.insert(self.Releases, Kit.MakeDraggable(Header, Shell))
@@ -2603,11 +2955,25 @@ function Overlay:BuildAdvanced()
 		Parent = Fill,
 		LayoutOrder = 2,
 		Size = UDim2.new(1, 0, 0, 30),
-		Options = { "Adjust", "Elements", "Map" },
+		Options = { "Adjust", "Elements", "Map", "Options" },
 		Default = "Adjust",
 		Callback = function(Value)
 			self:SetAdvancedPage(Value)
 		end,
+	})
+
+	self.Scroll = Kit.New("ScrollingFrame", {
+		Name = "Scroll",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 200),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 2,
+		LayoutOrder = 3,
+		ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
+		Parent = Fill,
 	})
 
 	local Pages = Kit.New("Frame", {
@@ -2615,16 +2981,17 @@ function Overlay:BuildAdvanced()
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		LayoutOrder = 3,
-		Parent = Fill,
+		Parent = self.Scroll,
 	}, {
 		Kit.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }),
 	})
+	self.PagesBody = Pages
 
 	self.Pages = {
 		Adjust = self:BuildAdjustPage(Pages),
 		Elements = self:BuildElementsPage(Pages),
 		Map = self:BuildMapPage(Pages),
+		Options = self:BuildOptionsPage(Pages),
 	}
 
 	self:SetAdvancedPage("Adjust")
@@ -2682,16 +3049,12 @@ function Overlay:BuildAdjustPage(Parent)
 		end)
 	end
 
-	local _, StepRight = Kit.Row(Page, 4, "Step")
-	self.StepControl = Kit.Segmented({
-		Parent = StepRight,
-		Size = UDim2.fromOffset(152, 30),
-		Options = Constants.NudgeSteps,
-		Default = Core.Settings.NudgeStep,
-		Callback = function(Value)
-			Core.Settings.NudgeStep = Value
-		end,
-	})
+	self:BuildHost(Page, "", 4, function(Host)
+		self:AddOption(Host, "AddSegmented", "HudDockNudgeStep", "NudgeStep", {
+			Title = "Nudge step",
+			Options = Constants.NudgeSteps,
+		})
+	end)
 
 	Kit.Divider(Page, 5, 6)
 
@@ -2979,6 +3342,65 @@ function Overlay:BuildElementsPage(Parent)
 	return Page
 end
 
+function Overlay:BuildOptionsPage(Parent)
+	local Core = self.Core
+	local Page = self:NewPage(Parent, "Options")
+
+	self:BuildHost(Page, "Behavior", 1, function(Host)
+		self:AddOption(Host, "AddToggle", "HudDockGroupCluster", "GroupCluster", {
+			Title = "Move linked elements together",
+			Description = "Elements sharing a center are edited as one",
+		})
+
+		self:AddOption(Host, "AddToggle", "HudDockRespectLocks", "RespectLocks", {
+			Title = "Respect element locks",
+			Description = "Skip elements that lock themselves",
+		})
+
+		Host:AddToggle("HudDockBarLocked", {
+			Title = "Lock action bar",
+			Description = "Keep the action bar from being dragged",
+			Default = Core.Session.BarLocked,
+			Callback = function(Value)
+				Core:SetBarLocked(Value)
+			end,
+		})
+		table.insert(self.OptionIds, "HudDockBarLocked")
+	end)
+
+	self:BuildHost(Page, "Selection", 2, function(Host)
+		self:AddOption(Host, "AddSegmented", "HudDockSelectionMode", "SelectionMode", {
+			Title = "Selection mode",
+			Options = { "Smart", "Exact" },
+		})
+
+		self:AddOption(Host, "AddSegmented", "HudDockAxis", "Axis", {
+			Title = "Drag axis",
+			Options = { "Free", "Horizontal", "Vertical" },
+		})
+	end)
+
+	self:BuildHost(Page, "Precision", 3, function(Host)
+		self:AddOption(Host, "AddSlider", "HudDockResizeStep", "ResizeStep", {
+			Title = "Resize step",
+			Min = 1,
+			Max = 50,
+			Rounding = 0,
+			Suffix = " px",
+		})
+
+		self:AddOption(Host, "AddSlider", "HudDockSnapSize", "SnapSize", {
+			Title = "Snap to grid",
+			Min = 0,
+			Max = 50,
+			Rounding = 0,
+			Suffix = " px",
+		})
+	end)
+
+	return Page
+end
+
 function Overlay:BuildMapPage(Parent)
 	local Page = self:NewPage(Parent, "Map")
 	local Viewport = Util.GetViewport()
@@ -2997,6 +3419,12 @@ function Overlay:BuildMapPage(Parent)
 	})
 	Kit.Track(Stroke, "Transparency", 0.85)
 
+	local Ratio = Kit.New("UIAspectRatioConstraint", {
+		AspectRatio = Viewport.X / math.max(Viewport.Y, 1),
+		DominantAxis = Enum.DominantAxis.Height,
+		AspectType = Enum.AspectType.FitWithinMaxSize,
+	})
+
 	local Surface = Kit.New("Frame", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
@@ -3007,11 +3435,7 @@ function Overlay:BuildMapPage(Parent)
 	}, {
 		Kit.Corner(8),
 		Stroke,
-		Kit.New("UIAspectRatioConstraint", {
-			AspectRatio = Viewport.X / math.max(Viewport.Y, 1),
-			DominantAxis = Enum.DominantAxis.Height,
-			AspectType = Enum.AspectType.FitWithinMaxSize,
-		}),
+		Ratio,
 	})
 	Kit.Track(Surface, "BackgroundTransparency", 0.94)
 
@@ -3035,6 +3459,7 @@ function Overlay:BuildMapPage(Parent)
 
 	self.Map = {
 		Surface = Surface,
+		Ratio = Ratio,
 		Boxes = {},
 		Kinds = {},
 		Palette = {
@@ -3086,7 +3511,7 @@ end
 
 function Overlay:SyncMap()
 	local Map = self.Map
-	local Screen = self.Core.Library.GUI.AbsoluteSize
+	local Screen = Util.GetViewport()
 
 	if Screen.X <= 0 or Screen.Y <= 0 then
 		return
@@ -3119,7 +3544,12 @@ function Overlay:SyncMap()
 	end
 end
 
-function Overlay:Tick()
+function Overlay:Tick(Delta)
+	self:StepDock(Delta)
+	self:StepMap()
+end
+
+function Overlay:StepMap()
 	if not self.Advanced.Visible or self.ActivePage ~= "Map" then
 		return
 	end
@@ -3182,6 +3612,7 @@ local function NewSettings()
 		SelectionMode = "Smart",
 		GroupCluster = true,
 		ShowLauncher = true,
+		RespectLocks = true,
 		LoadMode = "Replace",
 		NudgeStep = 5,
 	}
@@ -3200,9 +3631,12 @@ HUDManager.ActiveProfile = nil
 HUDManager.ScanToken = 0
 HUDManager.Settings = NewSettings()
 HUDManager.Session = NewSession()
+HUDManager.Bindings = {}
+HUDManager.Presses = {}
 HUDManager.Signals = {
 	StateChanged = Signal.new(),
 	SelectionChanged = Signal.new(),
+	SettingChanged = Signal.new(),
 }
 
 function HUDManager:SetLibrary(Library)
@@ -3279,11 +3713,21 @@ function HUDManager:Start()
 	self.History = History.new(Constants.HistoryLimit)
 	self.Session = NewSession()
 	self.Connections = {}
+	self.Presses = {}
 	self.Started = true
 
 	self:BuildFolderTree()
 
 	self.Overlay = Overlay.new(self)
+	self:ApplyLauncherState()
+	self:IgnoreSaveIndexes(self.Overlay.OptionIds)
+
+	table.insert(
+		self.Connections,
+		UserInputService.InputBegan:Connect(function(Input)
+			self:OnInputBegan(Input)
+		end)
+	)
 
 	table.insert(
 		self.Connections,
@@ -3316,8 +3760,8 @@ function HUDManager:Start()
 	)
 
 	pcall(RunService.UnbindFromRenderStep, RunService, Constants.RenderStepName)
-	RunService:BindToRenderStep(Constants.RenderStepName, Constants.RenderPriority, function()
-		Enforcer.Step(self)
+	RunService:BindToRenderStep(Constants.RenderStepName, Constants.RenderPriority, function(Delta)
+		Enforcer.Step(self, Delta)
 	end)
 
 	if not self.UnloadHooked then
@@ -3397,7 +3841,99 @@ function HUDManager:IsOverWindow()
 	return Util.PointInGui(UserInputService:GetMouseLocation(), Window.Root)
 end
 
+function HUDManager:OnInputBegan(Input)
+	if not Util.IsPointer(Input) or self.Session.EditMode or next(self.Book.Rules) == nil then
+		return
+	end
+
+	local Objects = {}
+	local Found = false
+
+	for Object, Key in self.Book.Tracked do
+		local Rule = self.Book.Rules[Key]
+
+		if
+			Rule
+			and not Rule.IsDeleted
+			and Object.Parent
+			and Object.Visible
+			and Geometry.ContainsInput(Object, Input.Position)
+		then
+			Objects[Object] = true
+			Found = true
+		end
+	end
+
+	if Found then
+		self.Presses[Input] = {
+			Origin = Vector2.new(Input.Position.X, Input.Position.Y),
+			Moved = false,
+			Objects = Objects,
+		}
+	end
+end
+
+function HUDManager:TrackPresses(Input)
+	for Key, Press in self.Presses do
+		if not Press.Moved then
+			local Tracking = if Key.UserInputType == Enum.UserInputType.Touch
+				then Input == Key
+				else Input.UserInputType == Enum.UserInputType.MouseMovement
+
+			if Tracking then
+				local Travel = Vector2.new(Input.Position.X, Input.Position.Y) - Press.Origin
+				if Travel.Magnitude >= Constants.TapThreshold then
+					Press.Moved = true
+				end
+			end
+		end
+	end
+end
+
+function HUDManager:IsYielding(Object)
+	for _, Press in self.Presses do
+		if Press.Moved and Press.Objects[Object] then
+			return true
+		end
+	end
+
+	return false
+end
+
+function HUDManager:AdoptPosition(Object, Key)
+	local Rule = self.Book.Rules[Key]
+	if not Rule then
+		return
+	end
+
+	local Before = self.Book:Snapshot(Key)
+	Rule.Position = Object.Position
+
+	self.History:Push("Move", { { Key = Key, Before = Before, After = self.Book:Snapshot(Key) } })
+	self.Book.Changed:Fire()
+end
+
+function HUDManager:IsElementLocked(Object)
+	if not self.Settings.RespectLocks then
+		return false
+	end
+
+	local Current = Object
+
+	while Current and Current ~= PlayerGui do
+		if Current:GetAttribute(Constants.LockAttribute) == true then
+			return true
+		end
+
+		Current = Current.Parent
+	end
+
+	return false
+end
+
 function HUDManager:OnInputChanged(Input)
+	self:TrackPresses(Input)
+
 	local Dragging = self.Session.DragInput
 	if not Dragging then
 		return
@@ -3413,6 +3949,18 @@ function HUDManager:OnInputChanged(Input)
 end
 
 function HUDManager:OnInputEnded(Input)
+	for Key in self.Presses do
+		local Same = Key == Input
+			or (
+				Key.UserInputType == Enum.UserInputType.MouseButton1
+				and Input.UserInputType == Enum.UserInputType.MouseButton1
+			)
+
+		if Same then
+			self.Presses[Key] = nil
+		end
+	end
+
 	local Dragging = self.Session.DragInput
 	if not Dragging then
 		return
@@ -3507,8 +4055,74 @@ function HUDManager:SetEditMode(Enabled)
 end
 
 function HUDManager:SetBarLocked(Locked)
+	Locked = Locked == true
+
+	if self.Session.BarLocked == Locked then
+		return
+	end
+
 	self.Session.BarLocked = Locked
 	self.Overlay:SetBarLocked(Locked)
+end
+
+function HUDManager:SetSetting(Key, Value)
+	if self.Settings[Key] == Value then
+		return
+	end
+
+	self.Settings[Key] = Value
+	self:SyncSetting(Key)
+	self.Signals.SettingChanged:Fire(Key, Value)
+
+	if Key == "ShowLauncher" then
+		self:ApplyLauncherState()
+	elseif Key == "ResizeStep" and self.Overlay then
+		self.Overlay:SetResizeStep(Value)
+	elseif Key == "RespectLocks" and self.Overlay then
+		self.Overlay:SetSelection(self.Session.Selected)
+	end
+end
+
+function HUDManager:BindOption(Key, Idx)
+	local List = self.Bindings[Key]
+
+	if not List then
+		List = {}
+		self.Bindings[Key] = List
+	end
+
+	if not table.find(List, Idx) then
+		table.insert(List, Idx)
+	end
+end
+
+function HUDManager:SyncSetting(Key)
+	local List = self.Bindings[Key]
+	if not List then
+		return
+	end
+
+	local Value = self.Settings[Key]
+
+	for _, Idx in List do
+		local Option = self.Library.Options[Idx]
+
+		if Option and Option.Value ~= Value then
+			pcall(Option.SetValue, Option, Value)
+		end
+	end
+end
+
+function HUDManager:ApplyLauncherState()
+	local Show = self.Settings.ShowLauncher
+
+	if self.Overlay then
+		self.Overlay:SetLauncherVisible(Show)
+	end
+
+	if self.ControlSection then
+		self.ControlSection:SetVisible(not Show)
+	end
 end
 
 function HUDManager:BeginDrag(Input)
@@ -3525,15 +4139,24 @@ end
 
 function HUDManager:BeginDragMutation()
 	local Session = self.Session
+	local Skipped = 0
 
 	for _, Object in Session.Cluster do
-		local Key = KeyResolver.Resolve(Object)
-		Session.DragBefore[Key] = self.Book:Snapshot(Key)
+		if self:IsElementLocked(Object) then
+			Skipped += 1
+		else
+			local Key = KeyResolver.Resolve(Object)
+			Session.DragBefore[Key] = self.Book:Snapshot(Key)
 
-		local Rule = self.Book:Ensure(Object, Key)
-		Session.DragStart[Object] = Rule.Position
-		Session.DragKeys[Object] = Key
-		Session.DragSet[Object] = true
+			local Rule = self.Book:Ensure(Object, Key)
+			Session.DragStart[Object] = Rule.Position
+			Session.DragKeys[Object] = Key
+			Session.DragSet[Object] = true
+		end
+	end
+
+	if Skipped > 0 and next(Session.DragStart) == nil then
+		self:Toast("Element is locked, unlock it first")
 	end
 end
 
@@ -3608,29 +4231,38 @@ function HUDManager:IsDragging()
 	return true
 end
 
-function HUDManager:Mutate(Label, Mutator, Merge)
+function HUDManager:Mutate(Label, Mutator, Merge, IgnoreLock)
 	if not self:RequireSelection() or self:IsDragging() then
 		return false
 	end
 
 	local Changes = {}
+	local Skipped = 0
 
 	for _, Object in self.Session.Cluster do
-		local Key = KeyResolver.Resolve(Object)
-		local Before = self.Book:Snapshot(Key)
-		local Rule = self.Book:Ensure(Object, Key)
-
-		if Mutator(Rule, Object) == false then
-			if not Before then
-				self.Book:Release(Key)
-			end
+		if not IgnoreLock and self:IsElementLocked(Object) then
+			Skipped += 1
 		else
-			self.Book:Apply(Object, Key, false)
-			table.insert(Changes, { Key = Key, Before = Before, After = self.Book:Snapshot(Key) })
+			local Key = KeyResolver.Resolve(Object)
+			local Before = self.Book:Snapshot(Key)
+			local Rule = self.Book:Ensure(Object, Key)
+
+			if Mutator(Rule, Object) == false then
+				if not Before then
+					self.Book:Release(Key)
+				end
+			else
+				self.Book:Apply(Object, Key, false)
+				table.insert(Changes, { Key = Key, Before = Before, After = self.Book:Snapshot(Key) })
+			end
 		end
 	end
 
 	if #Changes == 0 then
+		if Skipped > 0 then
+			self:Toast("Element is locked, unlock it first")
+		end
+
 		return false
 	end
 
@@ -3680,7 +4312,7 @@ function HUDManager:DeleteSelected()
 	local Done = self:Mutate("Hide", function(Rule)
 		Rule.IsDeleted = true
 		return true
-	end)
+	end, nil, true)
 
 	if Done then
 		self:ClearSelection()
@@ -3814,9 +4446,24 @@ function HUDManager:ResetAll()
 	self:ReplaceRules({}, false, "Reset all")
 end
 
-function HUDManager:ToggleWindow()
+function HUDManager:OpenSettings()
 	local Window = self.Library.Window
-	if Window then
+	if not Window then
+		return
+	end
+
+	if Window.Minimized then
+		Window:Minimize()
+	end
+
+	if self.Tab then
+		Window:SelectTab(self.Tab)
+	end
+end
+
+function HUDManager:HideWindow()
+	local Window = self.Library.Window
+	if Window and not Window.Minimized then
 		Window:Minimize()
 	end
 end
@@ -3885,6 +4532,83 @@ function HUDManager:Confirm(Title, Content, Label, Action)
 	})
 end
 
+function HUDManager:BuildControlSection(Tab)
+	self:Start()
+
+	local Library = self.Library
+	local Section = Tab:AddSection("Controls", { Icon = "lucide:mouse-pointer-2" })
+	self.ControlSection = Section
+
+	Section:AddToggle("HudEditMode", {
+		Title = "Edit mode",
+		Description = "Select, drag and resize elements on screen, the window hides while editing",
+		Icon = "lucide:pencil",
+		Default = self.Session.EditMode,
+		Callback = function(Value)
+			self:SetEditMode(Value)
+			if Value then
+				self:HideWindow()
+			end
+		end,
+	})
+
+	Section:AddButton({
+		Title = "Undo",
+		Description = "Revert the last change",
+		Variant = "Tonal",
+		ButtonText = "Undo",
+		ButtonIcon = "lucide:undo-2",
+		Callback = function()
+			self:Undo()
+		end,
+	})
+
+	Section:AddButton({
+		Title = "Redo",
+		Description = "Apply the change that was reverted",
+		Variant = "Tonal",
+		ButtonText = "Redo",
+		ButtonIcon = "lucide:redo-2",
+		Callback = function()
+			self:Redo()
+		end,
+	})
+
+	Section:AddButton({
+		Title = "Quick save",
+		Description = "Save the layout to the active profile",
+		Variant = "Primary",
+		ButtonText = "Save",
+		ButtonIcon = "lucide:save",
+		Callback = function()
+			self:QuickSave()
+		end,
+	})
+
+	Section:AddButton({
+		Title = "Advanced panel",
+		Description = "Nudge, resize and review modified elements",
+		Variant = "Outline",
+		ButtonText = "Toggle",
+		ButtonIcon = "lucide:sliders-horizontal",
+		Callback = function()
+			self.Overlay:ToggleAdvanced()
+		end,
+	})
+
+	table.insert(
+		self.Connections,
+		self.Signals.StateChanged:Connect(function(Enabled)
+			local Option = Library.Options.HudEditMode
+			if Option and Option.Value ~= Enabled then
+				pcall(Option.SetValue, Option, Enabled)
+			end
+		end)
+	)
+
+	self:ApplyLauncherState()
+end
+
 function HUDManager:BuildConfigSection(Tab)
 	self:Start()
 
@@ -3893,16 +4617,14 @@ function HUDManager:BuildConfigSection(Tab)
 
 	Section:AddToggle("HudShowLauncher", {
 		Title = "Floating launcher",
-		Description = "Show the draggable button that opens the quick dock",
+		Description = "Draggable button that opens the dock, the Controls section only shows while it is off",
 		Icon = "lucide:circle-dot",
 		Default = Settings.ShowLauncher,
 		Callback = function(Value)
-			Settings.ShowLauncher = Value
-			if self.Overlay then
-				self.Overlay:SetLauncherVisible(Value)
-			end
+			self:SetSetting("ShowLauncher", Value)
 		end,
 	})
+	self:BindOption("ShowLauncher", "HudShowLauncher")
 
 	Section:AddToggle("HudGroupCluster", {
 		Title = "Move linked elements together",
@@ -3910,9 +4632,21 @@ function HUDManager:BuildConfigSection(Tab)
 		Icon = "lucide:link",
 		Default = Settings.GroupCluster,
 		Callback = function(Value)
-			Settings.GroupCluster = Value
+			self:SetSetting("GroupCluster", Value)
 		end,
 	})
+	self:BindOption("GroupCluster", "HudGroupCluster")
+
+	Section:AddToggle("HudRespectLocks", {
+		Title = "Respect element locks",
+		Description = "Elements that lock themselves with the Locked attribute cannot be moved or resized here",
+		Icon = "lucide:lock",
+		Default = Settings.RespectLocks,
+		Callback = function(Value)
+			self:SetSetting("RespectLocks", Value)
+		end,
+	})
+	self:BindOption("RespectLocks", "HudRespectLocks")
 
 	Section:AddSegmented("HudSelectionMode", {
 		Title = "Selection mode",
@@ -3920,9 +4654,10 @@ function HUDManager:BuildConfigSection(Tab)
 		Options = { "Smart", "Exact" },
 		Default = Settings.SelectionMode,
 		Callback = function(Value)
-			Settings.SelectionMode = Value
+			self:SetSetting("SelectionMode", Value)
 		end,
 	})
+	self:BindOption("SelectionMode", "HudSelectionMode")
 
 	Section:AddSegmented("HudAxis", {
 		Title = "Drag axis",
@@ -3930,9 +4665,10 @@ function HUDManager:BuildConfigSection(Tab)
 		Options = { "Free", "Horizontal", "Vertical" },
 		Default = Settings.Axis,
 		Callback = function(Value)
-			Settings.Axis = Value
+			self:SetSetting("Axis", Value)
 		end,
 	})
+	self:BindOption("Axis", "HudAxis")
 
 	Section:AddSlider("HudResizeStep", {
 		Title = "Resize step",
@@ -3944,12 +4680,10 @@ function HUDManager:BuildConfigSection(Tab)
 		Rounding = 0,
 		Suffix = " px",
 		Callback = function(Value)
-			Settings.ResizeStep = Value
-			if self.Overlay then
-				self.Overlay:SetResizeStep(Value)
-			end
+			self:SetSetting("ResizeStep", Value)
 		end,
 	})
+	self:BindOption("ResizeStep", "HudResizeStep")
 
 	Section:AddSlider("HudSnapSize", {
 		Title = "Snap to grid",
@@ -3961,9 +4695,10 @@ function HUDManager:BuildConfigSection(Tab)
 		Rounding = 0,
 		Suffix = " px",
 		Callback = function(Value)
-			Settings.SnapSize = Value
+			self:SetSetting("SnapSize", Value)
 		end,
 	})
+	self:BindOption("SnapSize", "HudSnapSize")
 end
 
 function HUDManager:BuildProfileSection(Tab)
@@ -4237,10 +4972,12 @@ function HUDManager:BuildProfileSection(Tab)
 	})
 
 	DescribeAutoload()
-	self:IgnoreSaveIndexes({ "HudProfileName", "HudProfileList", "HudProfileImport" })
+	self:IgnoreSaveIndexes({ "HudEditMode", "HudProfileName", "HudProfileList", "HudProfileImport" })
 end
 
 function HUDManager:BuildSection(Tab)
+	self.Tab = Tab
+	self:BuildControlSection(Tab)
 	self:BuildConfigSection(Tab)
 	self:BuildProfileSection(Tab)
 end
