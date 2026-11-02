@@ -19,7 +19,6 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local Constants = {
 	Version = "2.0.0",
-	ExtensionId = "HUDManager.Elements",
 	RenderStepName = "HUDManagerEnforce",
 	RenderPriority = 2000,
 	OverlayLayer = "HUDManager",
@@ -44,24 +43,27 @@ local Constants = {
 	LegacyFolder = "PerfectUIManager_Configs",
 	NudgeSteps = { 1, 5, 10, 25 },
 	Icons = {
-		Edit = "tabler:pencil",
-		Undo = "tabler:arrow-back-up",
-		Redo = "tabler:arrow-forward-up",
-		Save = "tabler:device-floppy",
-		Panel = "tabler:layout-dashboard",
-		Power = "tabler:power",
-		Lock = "tabler:lock",
-		Unlock = "tabler:lock-open",
-		Plus = "tabler:plus",
-		Minus = "tabler:minus",
-		Reset = "tabler:refresh",
-		Delete = "tabler:eye-off",
-		Up = "tabler:arrow-up",
-		Down = "tabler:arrow-down",
-		Left = "tabler:arrow-left",
-		Right = "tabler:arrow-right",
-		Launcher = "tabler:adjustments-horizontal",
-		Focus = "tabler:focus-2",
+		Edit = "lucide:pencil",
+		Undo = "lucide:undo-2",
+		Redo = "lucide:redo-2",
+		Save = "lucide:save",
+		Panel = "lucide:layout-dashboard",
+		Advanced = "lucide:sliders-horizontal",
+		Close = "lucide:x",
+		Settings = "lucide:settings",
+		Power = "lucide:power",
+		Lock = "lucide:lock",
+		Unlock = "lucide:unlock",
+		Plus = "lucide:plus",
+		Minus = "lucide:minus",
+		Reset = "lucide:rotate-ccw",
+		Delete = "lucide:eye-off",
+		Up = "lucide:arrow-up",
+		Down = "lucide:arrow-down",
+		Left = "lucide:arrow-left",
+		Right = "lucide:arrow-right",
+		Launcher = "lucide:layout-dashboard",
+		Focus = "lucide:crosshair",
 	},
 	Glyphs = {
 		Edit = "E",
@@ -69,6 +71,9 @@ local Constants = {
 		Redo = ">",
 		Save = "S",
 		Panel = "P",
+		Advanced = "A",
+		Close = "x",
+		Settings = "S",
 		Power = "X",
 		Lock = "L",
 		Unlock = "U",
@@ -343,6 +348,21 @@ end
 
 function Geometry.Center(Gui)
 	return Gui.AbsolutePosition + Gui.AbsoluteSize / 2
+end
+
+function Geometry.Inset()
+	local TopLeft = GuiService:GetGuiInset()
+	return TopLeft
+end
+
+function Geometry.ScreenPosition(Gui)
+	local Root = Gui:FindFirstAncestorOfClass("ScreenGui")
+
+	if Root and not Root.IgnoreGuiInset then
+		return Gui.AbsolutePosition + Geometry.Inset()
+	end
+
+	return Gui.AbsolutePosition
 end
 
 local RuleBook = {}
@@ -800,14 +820,23 @@ end
 
 local Kit = {}
 
+Kit.Tracked = setmetatable({}, { __mode = "k" })
+Kit.Shadows = {}
+Kit.Alpha = nil
+
+local ShadowLayerCount = 8
+local MonoFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Medium, Enum.FontStyle.Normal)
+
 local ButtonStyles = {
-	Subtle = { Background = "DropdownFrame", Transparency = 0.93, Text = "Text" },
-	Tonal = { Background = "Accent", Transparency = 0.84, Text = "Text" },
-	Primary = { Background = "FillButton", Transparency = 0, Text = "FillButtonText" },
-	Active = { Background = "Accent", Transparency = 0, Text = "AccentText" },
-	Danger = { Background = "Danger", Transparency = 0.82, Text = "Danger" },
-	Success = { Background = "Success", Transparency = 0.82, Text = "Success" },
-	Ghost = { Background = "DropdownFrame", Transparency = 1, Text = "SubText" },
+	Menu = { Background = "Hover", Base = 1, Text = "Text" },
+	MenuDanger = { Background = "Danger", Base = 1, HoverBase = 0.88, PressBase = 0.8, Text = "Danger" },
+	Subtle = { Background = "DropdownFrame", Base = 0.93, Text = "Text", Stroke = true },
+	Tonal = { Background = "Accent", Base = 0.84, Text = "Text", Stroke = true },
+	Primary = { Background = "FillButton", Base = 0, Text = "FillButtonText" },
+	Active = { Background = "Accent", Base = 0.82, Text = "Text", Stroke = true },
+	Danger = { Background = "Danger", Base = 0.82, Text = "Danger" },
+	Success = { Background = "Success", Base = 0.82, Text = "Success" },
+	Ghost = { Background = "Hover", Base = 1, Text = "SubText" },
 }
 
 local IconObject = {}
@@ -819,6 +848,7 @@ ButtonObject.__index = ButtonObject
 function Kit.Bind(Library)
 	Kit.Library = Library
 	Kit.Creator = Library.Internals.Creator
+	Kit.Alpha = nil
 end
 
 function Kit.New(ClassName, Properties, Children)
@@ -831,6 +861,101 @@ end
 
 function Kit.Corner(Radius)
 	return Kit.New("UICorner", { CornerRadius = UDim.new(0, Radius) })
+end
+
+function Kit.Visibility()
+	local Library = Kit.Library
+	local Window = Library.Window
+	local Opacity = if Window and type(Window.Opacity) == "number" then Window.Opacity else 1
+	return Opacity * (if Library.Transparency then 0.92 else 1)
+end
+
+function Kit.CurrentAlpha()
+	return Kit.Library:GetPanelAlpha() * Kit.Visibility()
+end
+
+function Kit.Scale(Base)
+	return 1 - (1 - Base) * Kit.CurrentAlpha()
+end
+
+function Kit.Track(Object, Property, Base)
+	Kit.Tracked[Object] = { Property = Property, Base = Base }
+	Object[Property] = Kit.Scale(Base)
+end
+
+function Kit.Rebase(Object, Base)
+	local Entry = Kit.Tracked[Object]
+	if Entry then
+		Entry.Base = Base
+	end
+
+	return Kit.Scale(Base)
+end
+
+function Kit.Refresh()
+	local Alpha = Kit.CurrentAlpha()
+	if Kit.Alpha == Alpha then
+		return
+	end
+
+	Kit.Alpha = Alpha
+
+	for Object, Entry in Kit.Tracked do
+		if Object.Parent then
+			Object[Entry.Property] = 1 - (1 - Entry.Base) * Alpha
+		end
+	end
+end
+
+function Kit.Depth(Parent, Strength, Radius, Limit)
+	local Library = Kit.Library
+
+	local Container = Kit.New("Frame", {
+		Name = "Shadow",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		ZIndex = 0,
+		Parent = Parent,
+	})
+
+	local Layers = {}
+	for Index = ShadowLayerCount, 1, -1 do
+		local Corner = Kit.New("UICorner", {})
+		local Frame = Kit.New("Frame", {
+			Name = "Layer" .. Index,
+			BackgroundColor3 = Color3.new(0, 0, 0),
+			BorderSizePixel = 0,
+			Active = false,
+			Parent = Container,
+		}, { Corner })
+		Layers[Index] = { Frame = Frame, Corner = Corner }
+	end
+
+	local Entry = {
+		Image = Container,
+		Layers = Layers,
+		Radius = Radius or 12,
+		Strength = Strength or 1,
+		Empty = false,
+		VerticalLimit = Limit,
+	}
+
+	Library.Shadows[Container] = Entry
+	table.insert(Kit.Shadows, Container)
+	Library:SetPanelDepth(Library.PanelDepth)
+
+	return Entry
+end
+
+function Kit.Release()
+	local Library = Kit.Library
+
+	for _, Container in Kit.Shadows do
+		Library.Shadows[Container] = nil
+	end
+
+	table.clear(Kit.Shadows)
+	table.clear(Kit.Tracked)
 end
 
 function Kit.Label(Properties)
@@ -851,25 +976,94 @@ function Kit.Label(Properties)
 	return Kit.New("TextLabel", Final)
 end
 
-function Kit.Panel(Config)
-	return Kit.New("Frame", {
-		Size = Config.Size,
+function Kit.Surface(Config)
+	local Radius = Config.Radius or 10
+	local AutoY = Config.AutoY == true
+
+	local Shell = Kit.New("Frame", {
+		Name = Config.Name or "Surface",
+		BackgroundTransparency = 1,
+		Size = Config.Size or UDim2.new(),
 		Position = Config.Position or UDim2.new(),
 		AnchorPoint = Config.AnchorPoint or Vector2.zero,
+		LayoutOrder = Config.LayoutOrder or 0,
+		ZIndex = Config.ZIndex or 1,
 		Visible = Config.Visible ~= false,
-		Active = true,
-		BackgroundTransparency = Config.Transparency or 0.04,
-		ThemeTag = { BackgroundColor3 = Config.Background or "AcrylicMain" },
 		Parent = Config.Parent,
-	}, {
-		Kit.Corner(Config.Radius or 14),
-		Kit.New("UIStroke", {
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Thickness = 1,
-			Transparency = 0.35,
-			ThemeTag = { Color = "AcrylicBorder" },
-		}),
 	})
+
+	if Config.Strength and Config.Strength > 0 then
+		Kit.Depth(Shell, Config.Strength, Radius, Config.Limit)
+	end
+
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		ThemeTag = { Color = Config.Border or "AcrylicBorder" },
+	})
+	Kit.Track(Stroke, "Transparency", Config.BorderBase or 0.35)
+
+	local Fill = Kit.New("Frame", {
+		Name = "Fill",
+		Size = if AutoY then UDim2.new(1, 0, 0, 0) else UDim2.fromScale(1, 1),
+		AutomaticSize = if AutoY then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
+		Active = Config.Active ~= false,
+		ThemeTag = { BackgroundColor3 = Config.Background or "AcrylicMain" },
+		Parent = Shell,
+	}, {
+		Kit.Corner(Radius),
+		Stroke,
+	})
+	Kit.Track(Fill, "BackgroundTransparency", Config.Base or 0)
+
+	if AutoY then
+		local function Sync()
+			local Height = Fill.AbsoluteSize.Y
+			if Shell.Size.Y.Offset ~= Height then
+				Shell.Size = UDim2.new(Shell.Size.X.Scale, Shell.Size.X.Offset, 0, Height)
+			end
+		end
+
+		Fill:GetPropertyChangedSignal("AbsoluteSize"):Connect(Sync)
+		Shell:GetPropertyChangedSignal("Visible"):Connect(Sync)
+		task.defer(Sync)
+	end
+
+	return Shell, Fill
+end
+
+function Kit.Divider(Parent, Order, Inset)
+	local Holder = Kit.New("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 7),
+		LayoutOrder = Order,
+		Parent = Parent,
+	})
+
+	local Line = Kit.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -(Inset or 0) * 2, 0, 1),
+		BorderSizePixel = 0,
+		ThemeTag = { BackgroundColor3 = "ElementBorder" },
+		Parent = Holder,
+	})
+	Kit.Track(Line, "BackgroundTransparency", 0.88)
+
+	return Holder
+end
+
+function Kit.Separator(Parent, Order)
+	local Line = Kit.New("Frame", {
+		Size = UDim2.fromOffset(1, 16),
+		BorderSizePixel = 0,
+		LayoutOrder = Order,
+		ThemeTag = { BackgroundColor3 = "ElementBorder" },
+		Parent = Parent,
+	})
+	Kit.Track(Line, "BackgroundTransparency", 0.85)
+
+	return Line
 end
 
 function Kit.Icon(Config)
@@ -925,32 +1119,58 @@ end
 
 function Kit.Button(Config)
 	local Style = ButtonStyles[Config.Variant or "Subtle"] or ButtonStyles.Subtle
+	local Radius = Config.Radius or 8
+	local Aligned = Config.Align == "Left"
 
-	local Root = Kit.New("TextButton", {
-		Text = "",
-		AutoButtonColor = false,
+	local Root = Kit.New("Frame", {
+		Name = "Button",
+		BackgroundTransparency = 1,
 		Size = Config.Size or UDim2.fromOffset(34, 34),
 		Position = Config.Position or UDim2.new(),
 		AnchorPoint = Config.AnchorPoint or Vector2.zero,
 		LayoutOrder = Config.LayoutOrder or 0,
-		BackgroundTransparency = Style.Transparency,
-		ThemeTag = { BackgroundColor3 = Style.Background },
 		Parent = Config.Parent,
-	}, {
-		Kit.Corner(Config.Radius or 8),
 	})
+
+	if Config.Strength then
+		Kit.Depth(Root, Config.Strength, Radius, 4)
+	end
+
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		Enabled = Style.Stroke == true,
+		ThemeTag = { Color = "ElementBorder" },
+	})
+	Kit.Track(Stroke, "Transparency", 0.9)
+
+	local Hit = Kit.New("TextButton", {
+		Name = "Hit",
+		Text = "",
+		AutoButtonColor = false,
+		Size = UDim2.fromScale(1, 1),
+		ThemeTag = { BackgroundColor3 = Style.Background },
+		Parent = Root,
+	}, {
+		Kit.Corner(Radius),
+		Stroke,
+	})
+	Kit.Track(Hit, "BackgroundTransparency", Style.Base)
 
 	local Content = Kit.New("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
-		Parent = Root,
+		Parent = Hit,
 	}, {
 		Kit.New("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			HorizontalAlignment = if Aligned then Enum.HorizontalAlignment.Left else Enum.HorizontalAlignment.Center,
 			VerticalAlignment = Enum.VerticalAlignment.Center,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 6),
+			Padding = UDim.new(0, Config.Gap or 8),
+		}),
+		Kit.New("UIPadding", {
+			PaddingLeft = UDim.new(0, if Aligned then 10 else 0),
 		}),
 	})
 
@@ -983,28 +1203,73 @@ function Kit.Button(Config)
 
 	local Object = setmetatable({
 		Root = Root,
+		Hit = Hit,
+		Stroke = Stroke,
 		Label = Label,
 		Icon = Icon,
 		Style = Style,
 		Enabled = true,
 	}, ButtonObject)
 
-	Root.MouseEnter:Connect(function()
+	Hit.MouseEnter:Connect(function()
 		if Object.Enabled then
-			local Goal = if Object.Style.Transparency >= 1 then 0.93 else math.max(Object.Style.Transparency - 0.05, 0)
-			Kit.Creator.Tween(Root, 0.12, { BackgroundTransparency = Goal })
+			Object:Paint(Object:HoverBase())
 		end
 	end)
 
-	Root.MouseLeave:Connect(function()
-		Kit.Creator.Tween(Root, 0.12, { BackgroundTransparency = Object.Style.Transparency })
+	Hit.MouseLeave:Connect(function()
+		Object:Paint(Object.Style.Base)
+	end)
+
+	Hit.MouseButton1Down:Connect(function()
+		if Object.Enabled then
+			Object:Paint(Object:PressBase())
+		end
+	end)
+
+	Hit.MouseButton1Up:Connect(function()
+		if Object.Enabled then
+			Object:Paint(Object:HoverBase())
+		end
 	end)
 
 	return Object
 end
 
+function ButtonObject:HoverBase()
+	local Style = self.Style
+
+	if Style.HoverBase then
+		return Style.HoverBase
+	end
+
+	if Style.Base >= 0.99 then
+		return Kit.Creator.GetThemeProperty("HoverTransparency") or 0.945
+	end
+
+	return math.max(Style.Base - 0.05, 0)
+end
+
+function ButtonObject:PressBase()
+	local Style = self.Style
+
+	if Style.PressBase then
+		return Style.PressBase
+	end
+
+	if Style.Base >= 0.99 then
+		return Kit.Creator.GetThemeProperty("PressedTransparency") or 0.906
+	end
+
+	return math.max(Style.Base - 0.1, 0)
+end
+
+function ButtonObject:Paint(Base)
+	Kit.Creator.Tween(self.Hit, 0.12, { BackgroundTransparency = Kit.Rebase(self.Hit, Base) })
+end
+
 function ButtonObject:OnActivated(Callback)
-	return self.Root.Activated:Connect(function()
+	return self.Hit.Activated:Connect(function()
 		if self.Enabled then
 			Callback()
 		end
@@ -1015,8 +1280,9 @@ function ButtonObject:SetVariant(Name)
 	local Style = ButtonStyles[Name] or ButtonStyles.Subtle
 	self.Style = Style
 
-	Kit.Retag(self.Root, { BackgroundColor3 = Style.Background })
-	self.Root.BackgroundTransparency = Style.Transparency
+	Kit.Retag(self.Hit, { BackgroundColor3 = Style.Background })
+	self.Hit.BackgroundTransparency = Kit.Rebase(self.Hit, Style.Base)
+	self.Stroke.Enabled = Style.Stroke == true
 
 	if self.Label then
 		Kit.Retag(self.Label, { TextColor3 = Style.Text })
@@ -1150,7 +1416,7 @@ function Overlay.new(Core)
 		Core = Core,
 		Releases = {},
 		ClusterBoxes = {},
-		PendingConfirm = nil,
+		Controls = {},
 	}, Overlay)
 
 	Self.ShieldLayer = Library:CreateLayer(Constants.ShieldLayer, Constants.ShieldOrder)
@@ -1161,7 +1427,9 @@ function Overlay.new(Core)
 	Self:BuildLauncher()
 	Self:BuildDock()
 	Self:BuildActionBar()
-	Self:BuildConfirm()
+	Self:BuildAdvanced()
+	Self:SetResizeStep(Core.Settings.ResizeStep)
+	Self:SetSelection(nil)
 
 	return Self
 end
@@ -1176,36 +1444,90 @@ function Overlay:BuildShield()
 		Visible = false,
 		Parent = self.ShieldLayer,
 	})
+
+	self.Shield.InputBegan:Connect(function(Input)
+		self.Core:OnShieldPressed(Input)
+	end)
 end
 
 function Overlay:CreateBox(Primary)
-	return Kit.New("Frame", {
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = if Primary then 2 else 1,
+		Transparency = if Primary then 0.05 else 0.55,
+		ThemeTag = { Color = if Primary then "Accent" else "SubText" },
+	})
+
+	local Box = Kit.New("Frame", {
 		BackgroundTransparency = if Primary then 0.9 else 1,
 		Active = false,
 		Visible = false,
-		ThemeTag = { BackgroundColor3 = "Info" },
+		ZIndex = 1,
+		ThemeTag = { BackgroundColor3 = "Accent" },
 		Parent = self.Layer,
 	}, {
-		Kit.New("UIStroke", {
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Thickness = if Primary then 2 else 1,
-			Transparency = if Primary then 0 else 0.4,
-			ThemeTag = { Color = "Info" },
-		}),
+		Kit.Corner(4),
+		Stroke,
 	})
+
+	if Primary then
+		self.TagText = ""
+		self.TagFlipped = false
+		self.Tag = Kit.New("TextLabel", {
+			Name = "Tag",
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0, 0, 0, -5),
+			Size = UDim2.fromOffset(0, 18),
+			AutomaticSize = Enum.AutomaticSize.X,
+			BackgroundTransparency = 0,
+			BorderSizePixel = 0,
+			Text = "",
+			TextSize = 10,
+			FontFace = MonoFace,
+			ThemeTag = { BackgroundColor3 = "FillButton", TextColor3 = "FillButtonText" },
+			Parent = Box,
+		}, {
+			Kit.Corner(5),
+			Kit.New("UIPadding", {
+				PaddingLeft = UDim.new(0, 7),
+				PaddingRight = UDim.new(0, 7),
+			}),
+		})
+	end
+
+	return Box
 end
 
 function Overlay:BuildSelection()
 	self.PrimaryBox = self:CreateBox(true)
 end
 
+function Overlay:PlaceTag(Position, Size)
+	local Text = string.format("%d x %d", math.round(Size.X), math.round(Size.Y))
+	if self.TagText ~= Text then
+		self.TagText = Text
+		self.Tag.Text = Text
+	end
+
+	local Flipped = Position.Y < 30
+	if self.TagFlipped ~= Flipped then
+		self.TagFlipped = Flipped
+		self.Tag.AnchorPoint = if Flipped then Vector2.zero else Vector2.new(0, 1)
+		self.Tag.Position = if Flipped then UDim2.new(0, 0, 1, 5) else UDim2.new(0, 0, 0, -5)
+	end
+end
+
 function Overlay:PlaceBox(Box, Object)
-	local Position = Object.AbsolutePosition
+	local Position = Geometry.ScreenPosition(Object)
 	local Size = Object.AbsoluteSize
 
 	Box.Position = UDim2.fromOffset(Position.X, Position.Y)
 	Box.Size = UDim2.fromOffset(Size.X, Size.Y)
 	Box.Visible = true
+
+	if Box == self.PrimaryBox then
+		self:PlaceTag(Position, Size)
+	end
 end
 
 function Overlay:Reflect(Session)
@@ -1221,6 +1543,7 @@ function Overlay:Reflect(Session)
 	end
 
 	self:PlaceBox(self.PrimaryBox, Primary)
+	self:Readout(Primary)
 
 	local Used = 0
 	for _, Member in Session.Cluster do
@@ -1243,26 +1566,30 @@ end
 function Overlay:BuildLauncher()
 	local Core = self.Core
 
-	self.Launcher = Kit.Panel({
-		Size = UDim2.fromOffset(46, 46),
-		Position = UDim2.new(1, -62, 0.5, -23),
-		Radius = 23,
-		Visible = Core.Settings.ShowLauncher,
+	local Shell, Fill = Kit.Surface({
+		Name = "Launcher",
 		Parent = self.Layer,
+		Size = UDim2.fromOffset(40, 40),
+		Position = UDim2.new(1, -56, 0.5, -20),
+		Radius = 12,
+		Strength = 0.5,
+		ZIndex = 10,
+		Visible = Core.Settings.ShowLauncher,
 	})
+	self.Launcher = Shell
 
 	local Icon = Kit.Icon({
-		Parent = self.Launcher,
+		Parent = Fill,
 		Name = Constants.Icons.Launcher,
 		Fallback = Constants.Glyphs.Launcher,
-		Size = 20,
+		Size = 18,
 	})
 	Icon.Root.AnchorPoint = Vector2.new(0.5, 0.5)
 	Icon.Root.Position = UDim2.fromScale(0.5, 0.5)
 
 	table.insert(
 		self.Releases,
-		Kit.MakeDraggable(self.Launcher, self.Launcher, {
+		Kit.MakeDraggable(Fill, Shell, {
 			OnEnd = function(Moved)
 				if not Moved then
 					self:ToggleDock()
@@ -1275,39 +1602,47 @@ end
 function Overlay:BuildDock()
 	local Core = self.Core
 
-	self.Dock = Kit.Panel({
-		Size = UDim2.fromOffset(188, 0),
-		Position = UDim2.new(0, 12, 0.5, -130),
-		Visible = false,
+	local Shell, Fill = Kit.Surface({
+		Name = "Dock",
 		Parent = self.Layer,
+		Size = UDim2.fromOffset(200, 0),
+		Position = UDim2.new(0, 16, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		AutoY = true,
+		Radius = 12,
+		Strength = 0.6,
+		ZIndex = 10,
+		Visible = false,
 	})
-	self.Dock.AutomaticSize = Enum.AutomaticSize.Y
+	self.Dock = Shell
 
 	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 8),
-		PaddingBottom = UDim.new(0, 8),
-		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
-		Parent = self.Dock,
+		PaddingTop = UDim.new(0, 4),
+		PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 6),
+		PaddingRight = UDim.new(0, 6),
+		Parent = Fill,
 	})
 
 	Kit.New("UIListLayout", {
 		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 6),
-		Parent = self.Dock,
+		Padding = UDim.new(0, 2),
+		Parent = Fill,
 	})
 
 	local Header = Kit.New("Frame", {
-		Size = UDim2.new(1, 0, 0, 34),
+		Name = "Header",
+		Size = UDim2.new(1, 0, 0, 36),
 		BackgroundTransparency = 1,
 		LayoutOrder = 1,
-		Parent = self.Dock,
+		Parent = Fill,
 	})
 
 	Kit.Label({
 		Parent = Header,
 		Text = "HUD Manager",
-		Size = UDim2.new(1, 0, 0, 18),
+		Position = UDim2.fromOffset(10, 4),
+		Size = UDim2.new(1, -34, 0, 16),
 		Weight = "SemiBold",
 		TextSize = 13,
 	})
@@ -1315,37 +1650,55 @@ function Overlay:BuildDock()
 	self.DockStatus = Kit.Label({
 		Parent = Header,
 		Text = "Edit mode off",
-		Position = UDim2.fromOffset(0, 18),
-		Size = UDim2.new(1, 0, 0, 14),
+		Position = UDim2.fromOffset(10, 20),
+		Size = UDim2.new(1, -34, 0, 14),
 		TextSize = 11,
-		Tag = "SubText",
+		Tag = "TextSecondary",
 		Weight = "Regular",
 	})
 
-	table.insert(self.Releases, Kit.MakeDraggable(Header, self.Dock))
+	self.DockDot = Kit.New("Frame", {
+		Name = "StatusDot",
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -12, 0.5, 0),
+		Size = UDim2.fromOffset(8, 8),
+		BorderSizePixel = 0,
+		ThemeTag = { BackgroundColor3 = "SubText" },
+		Parent = Header,
+	}, { Kit.Corner(4) })
 
-	self.EditButton = Kit.Button({
-		Parent = self.Dock,
-		Text = "Edit mode",
-		Icon = Constants.Icons.Edit,
-		Fallback = Constants.Glyphs.Edit,
-		Size = UDim2.new(1, 0, 0, 34),
-		LayoutOrder = 2,
-	})
+	table.insert(self.Releases, Kit.MakeDraggable(Header, Shell))
+
+	Kit.Divider(Fill, 2, 4)
+
+	local function AddItem(Order, Text, Icon, Fallback, Size)
+		return Kit.Button({
+			Parent = Fill,
+			Text = Text,
+			Icon = Icon,
+			Fallback = Fallback,
+			Variant = "Menu",
+			Align = "Left",
+			Size = Size or UDim2.new(1, 0, 0, 30),
+			LayoutOrder = Order,
+		})
+	end
+
+	self.EditButton = AddItem(3, "Edit mode", Constants.Icons.Edit, Constants.Glyphs.Edit)
 	self.EditButton:OnActivated(function()
 		Core:SetEditMode(not Core.Session.EditMode)
 	end)
 
 	local HistoryRow = Kit.New("Frame", {
-		Size = UDim2.new(1, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, 30),
 		BackgroundTransparency = 1,
-		LayoutOrder = 3,
-		Parent = self.Dock,
+		LayoutOrder = 4,
+		Parent = Fill,
 	}, {
 		Kit.New("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 6),
+			Padding = UDim.new(0, 2),
 		}),
 	})
 
@@ -1354,7 +1707,9 @@ function Overlay:BuildDock()
 		Text = "Undo",
 		Icon = Constants.Icons.Undo,
 		Fallback = Constants.Glyphs.Undo,
-		Size = UDim2.new(0.5, -3, 1, 0),
+		Variant = "Menu",
+		Align = "Left",
+		Size = UDim2.new(0.5, -1, 1, 0),
 		LayoutOrder = 1,
 	})
 	self.UndoButton:OnActivated(function()
@@ -1366,56 +1721,25 @@ function Overlay:BuildDock()
 		Text = "Redo",
 		Icon = Constants.Icons.Redo,
 		Fallback = Constants.Glyphs.Redo,
-		Size = UDim2.new(0.5, -3, 1, 0),
+		Variant = "Menu",
+		Align = "Left",
+		Size = UDim2.new(0.5, -1, 1, 0),
 		LayoutOrder = 2,
 	})
 	self.RedoButton:OnActivated(function()
 		Core:Redo()
 	end)
 
-	local SaveButton = Kit.Button({
-		Parent = self.Dock,
-		Text = "Quick save",
-		Icon = Constants.Icons.Save,
-		Fallback = Constants.Glyphs.Save,
-		Size = UDim2.new(1, 0, 0, 34),
-		LayoutOrder = 4,
-	})
+	Kit.Divider(Fill, 5, 4)
+
+	local SaveButton = AddItem(6, "Quick save", Constants.Icons.Save, Constants.Glyphs.Save)
 	SaveButton:OnActivated(function()
 		Core:QuickSave()
 	end)
 
-	local PanelButton = Kit.Button({
-		Parent = self.Dock,
-		Text = "Open panel",
-		Icon = Constants.Icons.Panel,
-		Fallback = Constants.Glyphs.Panel,
-		Size = UDim2.new(1, 0, 0, 34),
-		LayoutOrder = 5,
-	})
-	PanelButton:OnActivated(function()
-		Core:ToggleWindow()
-	end)
-
-	local RemoveButton = Kit.Button({
-		Parent = self.Dock,
-		Text = "Remove HUD",
-		Icon = Constants.Icons.Power,
-		Fallback = Constants.Glyphs.Power,
-		Variant = "Danger",
-		Size = UDim2.new(1, 0, 0, 34),
-		LayoutOrder = 6,
-	})
-	RemoveButton:OnActivated(function()
-		self:Confirm({
-			Title = "Remove HUD Manager",
-			Content = "The overlay and editor will be removed. Your current layout stays until you rejoin.",
-			ConfirmText = "Remove",
-			Danger = true,
-			OnConfirm = function()
-				Core:Destroy(false)
-			end,
-		})
+	self.AdvancedButton = AddItem(7, "Advanced", Constants.Icons.Advanced, Constants.Glyphs.Advanced)
+	self.AdvancedButton:OnActivated(function()
+		self:ToggleAdvanced()
 	end)
 
 	self:SetHistoryState(false, false)
@@ -1424,200 +1748,145 @@ end
 function Overlay:BuildActionBar()
 	local Core = self.Core
 
-	self.ActionBar = Kit.Panel({
-		Size = UDim2.fromOffset(268, 82),
-		Position = UDim2.new(0.5, -134, 0.12, 0),
-		Radius = 16,
-		Visible = false,
+	local Shell, Fill = Kit.Surface({
+		Name = "ActionBar",
 		Parent = self.Layer,
+		Size = UDim2.fromOffset(292, 0),
+		Position = UDim2.new(0.5, 0, 0.1, 0),
+		AnchorPoint = Vector2.new(0.5, 0),
+		AutoY = true,
+		Radius = 12,
+		Strength = 0.6,
+		ZIndex = 10,
+		Visible = false,
+	})
+	self.ActionBar = Shell
+
+	Kit.New("UIPadding", {
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 6),
+		PaddingLeft = UDim.new(0, 6),
+		PaddingRight = UDim.new(0, 6),
+		Parent = Fill,
 	})
 
-	local Grip = Kit.New("Frame", {
-		Size = UDim2.new(1, -16, 0, 24),
-		Position = UDim2.fromOffset(8, 6),
+	Kit.New("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 2),
+		Parent = Fill,
+	})
+
+	local Header = Kit.New("Frame", {
+		Name = "Header",
+		Size = UDim2.new(1, 0, 0, 30),
 		BackgroundTransparency = 1,
-		Parent = self.ActionBar,
+		LayoutOrder = 1,
+		Parent = Fill,
 	})
 
-	self.SelectionLabel = Kit.Label({
-		Parent = Grip,
-		Text = "Tap an element to select it",
-		Size = UDim2.fromScale(1, 1),
+	self.SelectionName = Kit.Label({
+		Parent = Header,
+		Text = "Tap an element to select",
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.new(1, -108, 1, 0),
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Tag = "SubText",
+		Tag = "TextSecondary",
+		Weight = "SemiBold",
+	})
+
+	self.SelectionSize = Kit.Label({
+		Parent = Header,
+		Text = "",
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -10, 0, 0),
+		Size = UDim2.new(0, 0, 1, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextSize = 11,
+		FontFace = MonoFace,
+		Tag = "TextSecondary",
+		Weight = "Regular",
 	})
 
 	table.insert(
 		self.Releases,
-		Kit.MakeDraggable(Grip, self.ActionBar, {
+		Kit.MakeDraggable(Header, Shell, {
 			IsLocked = function()
 				return Core.Session.BarLocked
 			end,
 		})
 	)
 
-	local Row = Kit.New("Frame", {
-		Size = UDim2.new(1, -16, 0, 38),
-		Position = UDim2.fromOffset(8, 36),
-		BackgroundTransparency = 1,
-		Parent = self.ActionBar,
-	}, {
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 6),
-		}),
-	})
-
-	local function AddAction(Order, Icon, Fallback, Variant)
-		return Kit.Button({
-			Parent = Row,
-			Icon = Icon,
-			Fallback = Fallback,
-			Variant = Variant,
-			Size = UDim2.new(0.2, -4.8, 1, 0),
-			LayoutOrder = Order,
-		})
-	end
-
-	self.LockButton = AddAction(1, Constants.Icons.Unlock, Constants.Glyphs.Unlock)
-	self.LockButton:OnActivated(function()
-		Core:SetBarLocked(not Core.Session.BarLocked)
-	end)
-
-	AddAction(2, Constants.Icons.Minus, Constants.Glyphs.Minus):OnActivated(function()
-		Core:Resize(-Core.Settings.ResizeStep)
-	end)
-
-	AddAction(3, Constants.Icons.Plus, Constants.Glyphs.Plus):OnActivated(function()
-		Core:Resize(Core.Settings.ResizeStep)
-	end)
-
-	AddAction(4, Constants.Icons.Reset, Constants.Glyphs.Reset):OnActivated(function()
-		Core:ResetSelected()
-	end)
-
-	AddAction(5, Constants.Icons.Delete, Constants.Glyphs.Delete, "Danger"):OnActivated(function()
-		Core:DeleteSelected()
-	end)
-end
-
-function Overlay:BuildConfirm()
-	self.ConfirmDim = Kit.New("TextButton", {
-		Size = UDim2.fromScale(1, 1),
-		Text = "",
-		AutoButtonColor = false,
-		Active = true,
-		Visible = false,
-		ZIndex = 50,
-		BackgroundTransparency = 0.46,
-		ThemeTag = { BackgroundColor3 = "Overlay" },
-		Parent = self.Layer,
-	})
-
-	local Panel = Kit.Panel({
-		Size = UDim2.fromOffset(300, 0),
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Background = "DialogHolder",
-		Transparency = 0,
-		Parent = self.ConfirmDim,
-	})
-	Panel.AutomaticSize = Enum.AutomaticSize.Y
-
-	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 16),
-		PaddingBottom = UDim.new(0, 16),
-		PaddingLeft = UDim.new(0, 16),
-		PaddingRight = UDim.new(0, 16),
-		Parent = Panel,
-	})
-
-	Kit.New("UIListLayout", {
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 8),
-		Parent = Panel,
-	})
-
-	self.ConfirmTitle = Kit.Label({
-		Parent = Panel,
-		Text = "",
-		Size = UDim2.new(1, 0, 0, 20),
-		Weight = "SemiBold",
-		TextSize = 15,
-		LayoutOrder = 1,
-	})
-
-	self.ConfirmBody = Kit.Label({
-		Parent = Panel,
-		Text = "",
-		Size = UDim2.new(1, 0, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		TextWrapped = true,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		Tag = "SubText",
-		Weight = "Regular",
-		LayoutOrder = 2,
-	})
+	Kit.Divider(Fill, 2, 4)
 
 	local Row = Kit.New("Frame", {
 		Size = UDim2.new(1, 0, 0, 34),
 		BackgroundTransparency = 1,
 		LayoutOrder = 3,
-		Parent = Panel,
+		Parent = Fill,
 	}, {
 		Kit.New("UIListLayout", {
 			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
 			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 8),
+			Padding = UDim.new(0, 4),
 		}),
 	})
 
-	self.ConfirmAccept = Kit.Button({
-		Parent = Row,
-		Text = "Confirm",
-		Variant = "Danger",
-		Size = UDim2.new(0.5, -4, 1, 0),
-		LayoutOrder = 1,
-	})
-	self.ConfirmAccept:OnActivated(function()
-		self:ResolveConfirm(true)
-	end)
+	local function AddAction(Order, Icon, Fallback, Variant, Dependent)
+		local Button = Kit.Button({
+			Parent = Row,
+			Icon = Icon,
+			Fallback = Fallback,
+			Variant = Variant,
+			Size = UDim2.fromOffset(40, 32),
+			LayoutOrder = Order,
+		})
 
-	local Cancel = Kit.Button({
-		Parent = Row,
-		Text = "Cancel",
-		Size = UDim2.new(0.5, -4, 1, 0),
-		LayoutOrder = 2,
-	})
-	Cancel:OnActivated(function()
-		self:ResolveConfirm(false)
-	end)
-end
+		if Dependent then
+			table.insert(self.Controls, Button)
+		end
 
-function Overlay:Confirm(Config)
-	self.ConfirmTitle.Text = Config.Title or "Confirm"
-	self.ConfirmBody.Text = Config.Content or ""
-	self.ConfirmAccept:SetText(Config.ConfirmText or "Confirm")
-	self.ConfirmAccept:SetVariant(if Config.Danger then "Danger" else "Primary")
-	self.PendingConfirm = Config.OnConfirm
-	self.ConfirmDim.BackgroundTransparency = Kit.Creator.GetThemeProperty("OverlayTransparency") or 0.46
-	self.ConfirmDim.Visible = true
-end
-
-function Overlay:ResolveConfirm(Accepted)
-	local Callback = self.PendingConfirm
-	self.PendingConfirm = nil
-	self.ConfirmDim.Visible = false
-
-	if Accepted and Callback then
-		task.spawn(Callback)
+		return Button
 	end
-end
 
-function Overlay:IsConfirmOpen()
-	return self.ConfirmDim.Visible
+	self.LockButton = AddAction(1, Constants.Icons.Unlock, Constants.Glyphs.Unlock, "Menu", false)
+	self.LockButton:OnActivated(function()
+		Core:SetBarLocked(not Core.Session.BarLocked)
+	end)
+
+	Kit.Separator(Row, 2)
+
+	self:Hold(AddAction(3, Constants.Icons.Minus, Constants.Glyphs.Minus, "Menu", true), function()
+		Core:Resize(-Core.Settings.ResizeStep)
+	end)
+
+	self.StepLabel = Kit.Label({
+		Parent = Row,
+		Text = "",
+		Size = UDim2.fromOffset(40, 32),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextSize = 11,
+		FontFace = MonoFace,
+		Tag = "TextSecondary",
+		Weight = "Regular",
+		LayoutOrder = 4,
+	})
+
+	self:Hold(AddAction(5, Constants.Icons.Plus, Constants.Glyphs.Plus, "Menu", true), function()
+		Core:Resize(Core.Settings.ResizeStep)
+	end)
+
+	Kit.Separator(Row, 6)
+
+	AddAction(7, Constants.Icons.Reset, Constants.Glyphs.Reset, "Menu", true):OnActivated(function()
+		Core:ResetSelected()
+	end)
+
+	AddAction(8, Constants.Icons.Delete, Constants.Glyphs.Delete, "MenuDanger", true):OnActivated(function()
+		Core:DeleteSelected()
+	end)
 end
 
 function Overlay:ToggleDock()
@@ -1640,9 +1909,9 @@ function Overlay:SetEditState(Enabled)
 	self.Shield.Visible = Enabled
 	self.Shield.Active = Enabled
 	self.ActionBar.Visible = Enabled
-	self.EditButton:SetVariant(if Enabled then "Active" else "Subtle")
-	self.EditButton:SetText(if Enabled then "Edit mode: on" else "Edit mode")
-	self.DockStatus.Text = if Enabled then "Edit mode on" else "Edit mode off"
+	self.EditButton:SetVariant(if Enabled then "Active" else "Menu")
+	self.DockStatus.Text = if Enabled then "Tap an element to edit" else "Edit mode off"
+	Kit.Retag(self.DockDot, { BackgroundColor3 = if Enabled then "Success" else "SubText" })
 
 	if not Enabled then
 		self:SetSelection(nil)
@@ -1650,7 +1919,7 @@ function Overlay:SetEditState(Enabled)
 end
 
 function Overlay:SetBarLocked(Locked)
-	self.LockButton:SetVariant(if Locked then "Active" else "Subtle")
+	self.LockButton:SetVariant(if Locked then "Active" else "Menu")
 	self.LockButton:SetIcon(
 		if Locked then Constants.Icons.Lock else Constants.Icons.Unlock,
 		if Locked then Constants.Glyphs.Lock else Constants.Glyphs.Unlock
@@ -1662,42 +1931,47 @@ function Overlay:SetHistoryState(CanUndo, CanRedo)
 	self.RedoButton:SetEnabled(CanRedo)
 end
 
-function Overlay:SetSelection(Object)
-	if Object and Object.Parent then
-		self.SelectionLabel.Text = string.format(
-			"%s  |  %.0f x %.0f",
-			Object.Name,
-			Object.AbsoluteSize.X,
-			Object.AbsoluteSize.Y
-		)
-		Kit.Retag(self.SelectionLabel, { TextColor3 = "Text" })
-	else
-		self.SelectionLabel.Text = "Tap an element to select it"
-		Kit.Retag(self.SelectionLabel, { TextColor3 = "SubText" })
-	end
+function Overlay:FormatSize(Object)
+	local Size = Object.AbsoluteSize
+	return string.format("%d x %d", math.round(Size.X), math.round(Size.Y))
 end
 
-function Overlay:IsInterfaceHit(Position)
-	if self.ConfirmDim.Visible then
-		return true
+function Overlay:SetResizeStep(Value)
+	self.StepLabel.Text = tostring(Value) .. "px"
+end
+
+function Overlay:Readout(Object)
+	local Size = self:FormatSize(Object)
+	if self.ReadoutText == Size then
+		return
 	end
 
-	local Raw = Vector2.new(Position.X, Position.Y)
-	local Shifted = Raw + GuiService:GetGuiInset()
-	local Targets = { self.Launcher, self.Dock, self.ActionBar }
+	self.ReadoutText = Size
+	self.SelectionSize.Text = Size
+	self.AdvancedSelection.Text = Object.Name .. "  " .. Size
+end
 
-	local Window = self.Core.Library.Window
-	if Window and Window.Root and Window.Root.Visible then
-		table.insert(Targets, Window.Root)
+function Overlay:SetSelection(Object)
+	local Valid = Object ~= nil and Object.Parent ~= nil
+
+	if Valid then
+		local Size = self:FormatSize(Object)
+		self.ReadoutText = Size
+		self.SelectionName.Text = Object.Name
+		self.SelectionSize.Text = Size
+		self.AdvancedSelection.Text = Object.Name .. "  " .. Size
+		Kit.Retag(self.SelectionName, { TextColor3 = "Text" })
+	else
+		self.ReadoutText = nil
+		self.SelectionName.Text = "Tap an element to select"
+		self.SelectionSize.Text = ""
+		self.AdvancedSelection.Text = "None"
+		Kit.Retag(self.SelectionName, { TextColor3 = "TextSecondary" })
 	end
 
-	for _, Gui in Targets do
-		if Gui.Visible and (Util.PointInGui(Shifted, Gui) or Util.PointInGui(Raw, Gui)) then
-			return true
-		end
+	for _, Control in self.Controls do
+		Control:SetEnabled(Valid)
 	end
-
-	return false
 end
 
 function Overlay:Destroy()
@@ -1705,6 +1979,8 @@ function Overlay:Destroy()
 		Release()
 	end
 	table.clear(self.Releases)
+
+	Kit.Release()
 
 	local Library = self.Core.Library
 	pcall(Library.RemoveLayer, Library, Constants.OverlayLayer)
@@ -1761,7 +2037,9 @@ local Enforcer = {}
 
 function Enforcer.Step(Core)
 	local Session = Core.Session
+	Kit.Refresh()
 	Core.Overlay:Reflect(Session)
+	Core.Overlay:Tick()
 
 	local Book = Core.Book
 	if next(Book.Rules) == nil then
@@ -2024,12 +2302,173 @@ function ProfileStore.ImportLegacy(Core)
 	return Imported
 end
 
-local Elements = {}
+function Kit.Group(Parent, Order, Items)
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		ThemeTag = { Color = "ElementBorder" },
+	})
+	Kit.Track(Stroke, "Transparency", 0.9)
 
-function Elements.Repeater(Context, Button, Action)
+	local Root = Kit.New("Frame", {
+		Name = "Group",
+		Size = UDim2.fromOffset(0, 30),
+		AutomaticSize = Enum.AutomaticSize.X,
+		LayoutOrder = Order,
+		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
+		Parent = Parent,
+	}, {
+		Kit.Corner(8),
+		Stroke,
+		Kit.New("UIPadding", {
+			PaddingTop = UDim.new(0, 2),
+			PaddingBottom = UDim.new(0, 2),
+			PaddingLeft = UDim.new(0, 2),
+			PaddingRight = UDim.new(0, 2),
+		}),
+		Kit.New("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 2),
+		}),
+	})
+	Kit.Track(Root, "BackgroundTransparency", 0.93)
+
+	local Buttons = {}
+
+	for Index, Item in Items do
+		Buttons[Index] = Kit.Button({
+			Parent = Root,
+			Icon = Item.Icon,
+			Fallback = Item.Fallback,
+			Text = Item.Text,
+			Variant = Item.Variant or "Menu",
+			Size = UDim2.fromOffset(Item.Width or 28, 26),
+			Radius = 6,
+			IconSize = 14,
+			TextSize = 11,
+			LayoutOrder = Index,
+		})
+	end
+
+	return Root, Buttons
+end
+
+function Kit.Row(Parent, Order, Title)
+	local Row = Kit.New("Frame", {
+		Name = Title,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 36),
+		LayoutOrder = Order,
+		Parent = Parent,
+	})
+
+	Kit.Label({
+		Parent = Row,
+		Text = Title,
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(0.35, 0, 1, 0),
+	})
+
+	local Right = Kit.New("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -2, 0, 0),
+		Size = UDim2.new(0.65, 0, 1, 0),
+		Parent = Row,
+	}, {
+		Kit.New("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			HorizontalAlignment = Enum.HorizontalAlignment.Right,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 6),
+		}),
+	})
+
+	return Row, Right
+end
+
+function Kit.Segmented(Config)
+	local Options = Config.Options
+	local Count = #Options
+
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		ThemeTag = { Color = "ElementBorder" },
+	})
+	Kit.Track(Stroke, "Transparency", 0.9)
+
+	local Root = Kit.New("Frame", {
+		Name = "Segmented",
+		Size = Config.Size,
+		LayoutOrder = Config.LayoutOrder or 0,
+		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
+		Parent = Config.Parent,
+	}, {
+		Kit.Corner(8),
+		Stroke,
+		Kit.New("UIPadding", {
+			PaddingTop = UDim.new(0, 2),
+			PaddingBottom = UDim.new(0, 2),
+			PaddingLeft = UDim.new(0, 2),
+			PaddingRight = UDim.new(0, 2),
+		}),
+		Kit.New("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 2),
+		}),
+	})
+	Kit.Track(Root, "BackgroundTransparency", 0.93)
+
+	local Object = { Root = Root, Value = Config.Default, Buttons = {} }
+
+	local function Paint()
+		for Option, Button in Object.Buttons do
+			Button:SetVariant(if Option == Object.Value then "Active" else "Menu")
+		end
+	end
+
+	function Object:SetValue(Value, Silent)
+		if not self.Buttons[Value] then
+			return
+		end
+
+		self.Value = Value
+		Paint()
+
+		if not Silent and Config.Callback then
+			Config.Callback(Value)
+		end
+	end
+
+	for Index, Option in Options do
+		local Button = Kit.Button({
+			Parent = Root,
+			Text = tostring(Option),
+			Variant = "Menu",
+			Radius = 6,
+			TextSize = 11,
+			Size = UDim2.new(1 / Count, -(2 * (Count - 1)) / Count, 1, 0),
+			LayoutOrder = Index,
+		})
+		Button:OnActivated(function()
+			Object:SetValue(Option)
+		end)
+		Object.Buttons[Option] = Button
+	end
+
+	Paint()
+	return Object
+end
+
+function Overlay:Hold(Button, Action)
 	local Token = 0
 
-	Button.Root.InputBegan:Connect(function(Input)
+	Button.Hit.InputBegan:Connect(function(Input)
 		if not Util.IsPointer(Input) or not Button.Enabled then
 			return
 		end
@@ -2040,7 +2479,7 @@ function Elements.Repeater(Context, Button, Action)
 		Action()
 
 		task.delay(Constants.RepeatDelay, function()
-			while Token == Current and Context.Alive do
+			while Token == Current and self.Core.Started and Button.Enabled do
 				Action()
 				task.wait(Constants.RepeatInterval)
 			end
@@ -2056,627 +2495,667 @@ function Elements.Repeater(Context, Button, Action)
 	end)
 end
 
-function Elements.Status(Core)
-	return {
-		NoIdx = true,
-		Defaults = {
-			Title = "Overview",
-			Description = "Live summary of the HUD layout",
-		},
-		Build = function(Context)
-			local Strip = Context:Below(Context:Frame({ BackgroundTransparency = 1 }), 58, 8)
-			Context:List(Strip, Enum.FillDirection.Horizontal, 6)
+function Overlay:Listen(Signal, Handler)
+	local Link = Signal:Connect(Handler)
 
-			local Values = {}
-			local Captions = { "Total", "Hidden", "Moved", "History" }
-
-			for Index, Caption in Captions do
-				local Tile = Kit.New("Frame", {
-					Size = UDim2.new(0.25, -4.5, 1, 0),
-					BackgroundTransparency = 0.94,
-					LayoutOrder = Index,
-					ThemeTag = { BackgroundColor3 = "DropdownFrame" },
-					Parent = Strip,
-				}, {
-					Kit.Corner(10),
-				})
-
-				Values[Caption] = Kit.Label({
-					Parent = Tile,
-					Text = "0",
-					Position = UDim2.fromOffset(12, 8),
-					Size = UDim2.new(1, -24, 0, 24),
-					TextSize = 18,
-					Weight = "Bold",
-				})
-
-				Kit.Label({
-					Parent = Tile,
-					Text = Caption,
-					Position = UDim2.fromOffset(12, 33),
-					Size = UDim2.new(1, -24, 0, 14),
-					TextSize = 11,
-					Tag = "SubText",
-					Weight = "Regular",
-				})
-			end
-
-			local function Refresh()
-				if not Context.Alive then
-					return
-				end
-
-				local Counts = Core.Book:Counts()
-				Values.Total.Text = tostring(Counts.Total)
-				Values.Hidden.Text = tostring(Counts.Hidden)
-				Values.Moved.Text = tostring(Counts.Moved)
-				Values.History.Text = tostring(#Core.History.Undos)
-
-				local State = if Core.Session.EditMode then "Edit mode on" else "Edit mode off"
-				Context.Row:SetDesc(State .. "  |  " .. Counts.Resized .. " resized")
-			end
-
-			Context:Signal(Core.Book.Changed, Refresh)
-			Context:Signal(Core.History.Changed, Refresh)
-			Context:Signal(Core.Signals.StateChanged, Refresh)
-			Refresh()
-
-			return { Refresh = Refresh }
-		end,
-	}
+	table.insert(self.Releases, function()
+		Link:Disconnect()
+	end)
 end
 
-function Elements.NudgePad(Core)
-	return {
-		Save = true,
-		Defaults = {
-			Title = "Precision pad",
-			Description = "Move, resize or hide the selected element",
-			Default = 5,
-		},
-		Build = function(Context)
-			local Body = Context:Below(Context:Frame({ BackgroundTransparency = 1 }), 104, 8)
-
-			local Pad = {}
-			Pad.Value = if table.find(Constants.NudgeSteps, Context.Config.Default) then Context.Config.Default else 5
-
-			local StepButtons = {}
-
-			local function PaintSteps()
-				for Step, Button in StepButtons do
-					Button:SetVariant(if Step == Pad.Value then "Active" else "Subtle")
-				end
-			end
-
-			function Pad:SetValue(Step, Silent)
-				if not table.find(Constants.NudgeSteps, Step) then
-					return
-				end
-
-				Pad.Value = Step
-				Core.Settings.NudgeStep = Step
-				PaintSteps()
-
-				if not Silent then
-					Context:Fire(Step)
-				end
-			end
-
-			local Directions = {
-				{ Column = 1, Line = 0, Icon = "Up", X = 0, Y = -1 },
-				{ Column = 0, Line = 1, Icon = "Left", X = -1, Y = 0 },
-				{ Column = 2, Line = 1, Icon = "Right", X = 1, Y = 0 },
-				{ Column = 1, Line = 2, Icon = "Down", X = 0, Y = 1 },
-			}
-
-			for _, Direction in Directions do
-				local Button = Kit.Button({
-					Parent = Body,
-					Icon = Constants.Icons[Direction.Icon],
-					Fallback = Constants.Glyphs[Direction.Icon],
-					Size = UDim2.fromOffset(30, 30),
-					Position = UDim2.fromOffset(Direction.Column * 34, Direction.Line * 34),
-					IconSize = 14,
-					Radius = 8,
-				})
-
-				Elements.Repeater(Context, Button, function()
-					Core:Nudge(Direction.X * Pad.Value, Direction.Y * Pad.Value)
-				end)
-			end
-
-			local Center = Kit.Button({
-				Parent = Body,
-				Icon = Constants.Icons.Reset,
-				Fallback = Constants.Glyphs.Reset,
-				Variant = "Tonal",
-				Size = UDim2.fromOffset(30, 30),
-				Position = UDim2.fromOffset(34, 34),
-				IconSize = 14,
-				Radius = 8,
-			})
-			Center:OnActivated(function()
-				Core:ResetSelected()
-			end)
-
-			local Side = Kit.New("Frame", {
-				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(120, 0),
-				Size = UDim2.new(1, -120, 1, 0),
-				Parent = Body,
-			})
-
-			Kit.Label({
-				Parent = Side,
-				Text = "Step in pixels",
-				Size = UDim2.new(1, 0, 0, 14),
-				TextSize = 11,
-				Tag = "SubText",
-				Weight = "Regular",
-			})
-
-			local StepRow = Kit.New("Frame", {
-				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(0, 18),
-				Size = UDim2.new(1, 0, 0, 28),
-				Parent = Side,
-			}, {
-				Kit.New("UIListLayout", {
-					FillDirection = Enum.FillDirection.Horizontal,
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					Padding = UDim.new(0, 6),
-				}),
-			})
-
-			for Index, Step in Constants.NudgeSteps do
-				local Button = Kit.Button({
-					Parent = StepRow,
-					Text = tostring(Step),
-					Size = UDim2.fromOffset(54, 28),
-					LayoutOrder = Index,
-				})
-				Button:OnActivated(function()
-					Pad:SetValue(Step)
-				end)
-				StepButtons[Step] = Button
-			end
-
-			Kit.Label({
-				Parent = Side,
-				Text = "Size and visibility",
-				Position = UDim2.fromOffset(0, 54),
-				Size = UDim2.new(1, 0, 0, 14),
-				TextSize = 11,
-				Tag = "SubText",
-				Weight = "Regular",
-			})
-
-			local ActionRow = Kit.New("Frame", {
-				BackgroundTransparency = 1,
-				Position = UDim2.fromOffset(0, 72),
-				Size = UDim2.new(1, 0, 0, 28),
-				Parent = Side,
-			}, {
-				Kit.New("UIListLayout", {
-					FillDirection = Enum.FillDirection.Horizontal,
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					Padding = UDim.new(0, 6),
-				}),
-			})
-
-			local Smaller = Kit.Button({
-				Parent = ActionRow,
-				Text = "Smaller",
-				Icon = Constants.Icons.Minus,
-				Fallback = Constants.Glyphs.Minus,
-				Size = UDim2.fromOffset(84, 28),
-				IconSize = 12,
-				LayoutOrder = 1,
-			})
-			Elements.Repeater(Context, Smaller, function()
-				Core:Resize(-Core.Settings.ResizeStep)
-			end)
-
-			local Larger = Kit.Button({
-				Parent = ActionRow,
-				Text = "Larger",
-				Icon = Constants.Icons.Plus,
-				Fallback = Constants.Glyphs.Plus,
-				Size = UDim2.fromOffset(84, 28),
-				IconSize = 12,
-				LayoutOrder = 2,
-			})
-			Elements.Repeater(Context, Larger, function()
-				Core:Resize(Core.Settings.ResizeStep)
-			end)
-
-			local Hide = Kit.Button({
-				Parent = ActionRow,
-				Text = "Hide",
-				Icon = Constants.Icons.Delete,
-				Fallback = Constants.Glyphs.Delete,
-				Variant = "Danger",
-				Size = UDim2.fromOffset(84, 28),
-				IconSize = 12,
-				LayoutOrder = 3,
-			})
-			Hide:OnActivated(function()
-				Core:DeleteSelected()
-			end)
-
-			PaintSteps()
-			Core.Settings.NudgeStep = Pad.Value
-
-			return Pad
-		end,
-	}
+function Overlay:NewPage(Parent, Name)
+	return Kit.New("Frame", {
+		Name = Name,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Visible = false,
+		Parent = Parent,
+	}, {
+		Kit.New("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 2),
+		}),
+	})
 end
 
-function Elements.RuleList(Core)
-	return {
-		NoIdx = true,
-		Defaults = {
-			Title = "Modified elements",
-			Description = "Everything you moved, resized or hid",
-			Height = 240,
-		},
-		Build = function(Context)
-			local Body = Context:Below(Context:Frame({ BackgroundTransparency = 1 }), Context.Config.Height, 8)
+function Overlay:BuildAdvanced()
+	local Core = self.Core
 
-			local Filter = "All"
-			local Filters = { "All", "Hidden", "Moved", "Resized" }
-			local FilterButtons = {}
-			local Rows = {}
+	local Shell, Fill = Kit.Surface({
+		Name = "Advanced",
+		Parent = self.Layer,
+		Size = UDim2.fromOffset(340, 0),
+		Position = UDim2.new(0, 232, 0.5, 0),
+		AnchorPoint = Vector2.new(0, 0.5),
+		AutoY = true,
+		Radius = 12,
+		Strength = 0.6,
+		ZIndex = 10,
+		Visible = false,
+	})
+	self.Advanced = Shell
 
-			local FilterRow = Kit.New("Frame", {
-				BackgroundTransparency = 1,
-				Size = UDim2.new(1, 0, 0, 28),
-				Parent = Body,
-			}, {
-				Kit.New("UIListLayout", {
-					FillDirection = Enum.FillDirection.Horizontal,
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					Padding = UDim.new(0, 6),
-				}),
-			})
+	Kit.New("UIPadding", {
+		PaddingTop = UDim.new(0, 6),
+		PaddingBottom = UDim.new(0, 8),
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+		Parent = Fill,
+	})
 
-			local List = Kit.New("ScrollingFrame", {
-				BackgroundTransparency = 1,
-				BorderSizePixel = 0,
-				Position = UDim2.fromOffset(0, 36),
-				Size = UDim2.new(1, 0, 1, -36),
-				ScrollBarThickness = 3,
-				AutomaticCanvasSize = Enum.AutomaticSize.Y,
-				CanvasSize = UDim2.new(),
-				ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
-				Parent = Body,
-			}, {
-				Kit.New("UIListLayout", {
-					SortOrder = Enum.SortOrder.LayoutOrder,
-					Padding = UDim.new(0, 4),
-				}),
-			})
+	Kit.New("UIListLayout", {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 6),
+		Parent = Fill,
+	})
 
-			local Empty = Kit.Label({
-				Parent = List,
-				Text = "No elements match this filter",
-				Size = UDim2.new(1, 0, 0, 30),
-				TextXAlignment = Enum.TextXAlignment.Center,
-				Tag = "SubText",
-				Weight = "Regular",
-			})
+	local Header = Kit.New("Frame", {
+		Name = "Header",
+		Size = UDim2.new(1, 0, 0, 28),
+		BackgroundTransparency = 1,
+		LayoutOrder = 1,
+		Parent = Fill,
+	})
 
-			local function Matches(Rule)
-				if Filter == "Hidden" then
-					return Rule.IsDeleted
-				elseif Filter == "Moved" then
-					return not Rule.IsDeleted
-				elseif Filter == "Resized" then
-					return Rule.SizeModified
-				end
+	Kit.Label({
+		Parent = Header,
+		Text = "Advanced",
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(1, -72, 1, 0),
+		Weight = "SemiBold",
+		TextSize = 13,
+	})
 
-				return true
-			end
+	local Close = Kit.Button({
+		Parent = Header,
+		Icon = Constants.Icons.Close,
+		Fallback = Constants.Glyphs.Close,
+		Variant = "Menu",
+		Size = UDim2.fromOffset(26, 26),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, 0, 0.5, 0),
+		IconSize = 14,
+		Radius = 7,
+	})
+	Close:OnActivated(function()
+		self:SetAdvancedVisible(false)
+	end)
 
-			local function Describe(Rule)
-				if Rule.IsDeleted then
-					return "Hidden"
-				end
+	local Settings = Kit.Button({
+		Parent = Header,
+		Icon = Constants.Icons.Settings,
+		Fallback = Constants.Glyphs.Settings,
+		Variant = "Menu",
+		Size = UDim2.fromOffset(26, 26),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -30, 0.5, 0),
+		IconSize = 14,
+		Radius = 7,
+	})
+	Settings:OnActivated(function()
+		Core:ToggleWindow()
+	end)
 
-				return if Rule.SizeModified then "Moved and resized" else "Moved"
-			end
+	table.insert(self.Releases, Kit.MakeDraggable(Header, Shell))
 
-			local function Clear()
-				for _, Row in Rows do
-					Row:Destroy()
-				end
-				table.clear(Rows)
-			end
-
-			local function CreateRow(Key, Rule, Order)
-				local Row = Kit.New("Frame", {
-					Size = UDim2.new(1, -6, 0, 40),
-					BackgroundTransparency = 0.94,
-					LayoutOrder = Order,
-					ThemeTag = { BackgroundColor3 = "DropdownFrame" },
-					Parent = List,
-				}, {
-					Kit.Corner(8),
-				})
-
-				Kit.Label({
-					Parent = Row,
-					Text = Rule.Name,
-					Position = UDim2.fromOffset(10, 4),
-					Size = UDim2.new(1, -84, 0, 16),
-					TextTruncate = Enum.TextTruncate.AtEnd,
-					Weight = "SemiBold",
-				})
-
-				Kit.Label({
-					Parent = Row,
-					Text = Describe(Rule),
-					Position = UDim2.fromOffset(10, 21),
-					Size = UDim2.new(1, -84, 0, 14),
-					TextSize = 11,
-					Tag = if Rule.IsDeleted then "Danger" else "SubText",
-					Weight = "Regular",
-				})
-
-				local Restore = Kit.Button({
-					Parent = Row,
-					Icon = Constants.Icons.Reset,
-					Fallback = Constants.Glyphs.Reset,
-					Size = UDim2.fromOffset(28, 28),
-					AnchorPoint = Vector2.new(1, 0.5),
-					Position = UDim2.new(1, -6, 0.5, 0),
-					IconSize = 14,
-					Radius = 7,
-				})
-				Restore:OnActivated(function()
-					Core:RestoreKey(Key)
-				end)
-
-				if not Rule.IsDeleted then
-					local Focus = Kit.Button({
-						Parent = Row,
-						Icon = Constants.Icons.Focus,
-						Fallback = Constants.Glyphs.Focus,
-						Variant = "Tonal",
-						Size = UDim2.fromOffset(28, 28),
-						AnchorPoint = Vector2.new(1, 0.5),
-						Position = UDim2.new(1, -40, 0.5, 0),
-						IconSize = 14,
-						Radius = 7,
-					})
-					Focus:OnActivated(function()
-						Core:FocusKey(Key)
-					end)
-				end
-
-				table.insert(Rows, Row)
-			end
-
-			local function Rebuild()
-				if not Context.Alive then
-					return
-				end
-
-				Clear()
-
-				local Order = 0
-				for _, Key in Util.SortedKeys(Core.Book.Rules) do
-					local Rule = Core.Book.Rules[Key]
-					if Matches(Rule) then
-						Order += 1
-						CreateRow(Key, Rule, Order)
-					end
-				end
-
-				Empty.Visible = Order == 0
-			end
-
-			local Pending = false
-			local function Schedule()
-				if Pending then
-					return
-				end
-
-				Pending = true
-				task.defer(function()
-					Pending = false
-					Rebuild()
-				end)
-			end
-
-			for Index, Name in Filters do
-				local Button = Kit.Button({
-					Parent = FilterRow,
-					Text = Name,
-					Size = UDim2.fromOffset(74, 28),
-					Variant = if Name == Filter then "Active" else "Subtle",
-					LayoutOrder = Index,
-				})
-				Button:OnActivated(function()
-					Filter = Name
-					for Other, OtherButton in FilterButtons do
-						OtherButton:SetVariant(if Other == Filter then "Active" else "Subtle")
-					end
-					Schedule()
-				end)
-				FilterButtons[Name] = Button
-			end
-
-			Context:Signal(Core.Book.Changed, Schedule)
-			Rebuild()
-
-			return { Refresh = Rebuild }
-		end,
-	}
-end
-
-function Elements.ScreenMap(Core)
-	return {
-		NoIdx = true,
-		Defaults = {
-			Title = "Screen map",
-			Description = "Blue is selected, gray is moved, red is hidden. Tap a block to focus it",
-			Height = 170,
-		},
-		Build = function(Context)
-			local Body = Context:Below(Context:Frame({ BackgroundTransparency = 1 }), Context.Config.Height, 8)
-			local Viewport = Util.GetViewport()
-
-			local Surface = Kit.New("Frame", {
-				AnchorPoint = Vector2.new(0.5, 0.5),
-				Position = UDim2.fromScale(0.5, 0.5),
-				Size = UDim2.fromScale(1, 1),
-				ClipsDescendants = true,
-				BackgroundTransparency = 0.2,
-				ThemeTag = { BackgroundColor3 = "AcrylicMain" },
-				Parent = Body,
-			}, {
-				Kit.Corner(8),
-				Kit.New("UIAspectRatioConstraint", {
-					AspectRatio = Viewport.X / math.max(Viewport.Y, 1),
-					DominantAxis = Enum.DominantAxis.Height,
-					AspectType = Enum.AspectType.FitWithinMaxSize,
-				}),
-				Kit.New("UIStroke", {
-					ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-					Thickness = 1,
-					Transparency = 0.7,
-					ThemeTag = { Color = "ElementBorder" },
-				}),
-			})
-
-			local Boxes = {}
-			local Kinds = {}
-
-			local Palette = {
-				Selected = { Background = "Info", Transparency = 0.55 },
-				Moved = { Background = "Accent", Transparency = 0.75 },
-				Hidden = { Background = "Danger", Transparency = 0.7 },
-			}
-
-			local function Paint(Box, Kind)
-				if Kinds[Box] == Kind then
-					return
-				end
-
-				Kinds[Box] = Kind
-				Kit.Retag(Box, { BackgroundColor3 = Palette[Kind].Background })
-				Box.BackgroundTransparency = Palette[Kind].Transparency
-			end
-
-			local function Draw(Object, Kind, Screen, Seen)
-				if not Object.Parent or Seen[Object] then
-					return
-				end
-
-				Seen[Object] = true
-
-				local Box = Boxes[Object]
-				if not Box then
-					Box = Kit.New("TextButton", {
-						Text = "",
-						AutoButtonColor = false,
-						BorderSizePixel = 0,
-						Parent = Surface,
-						ThemeTag = { BackgroundColor3 = Palette[Kind].Background },
-					})
-					Box.Activated:Connect(function()
-						Core:FocusObject(Object)
-					end)
-					Boxes[Object] = Box
-				end
-
-				Paint(Box, Kind)
-
-				local Position = Object.AbsolutePosition
-				local Size = Object.AbsoluteSize
-
-				Box.Position = UDim2.fromScale(Position.X / Screen.X, Position.Y / Screen.Y)
-				Box.Size = UDim2.fromScale(math.max(Size.X / Screen.X, 0.008), math.max(Size.Y / Screen.Y, 0.008))
-			end
-
-			local function Sync()
-				local Screen = Core.Library.GUI.AbsoluteSize
-				if Screen.X <= 0 or Screen.Y <= 0 then
-					return
-				end
-
-				local Seen = {}
-				local Session = Core.Session
-
-				if Session.Selected then
-					Draw(Session.Selected, "Selected", Screen, Seen)
-				end
-
-				for _, Member in Session.Cluster do
-					Draw(Member, "Selected", Screen, Seen)
-				end
-
-				for Object, Key in Core.Book.Tracked do
-					local Rule = Core.Book.Rules[Key]
-					if Rule then
-						Draw(Object, if Rule.IsDeleted then "Hidden" else "Moved", Screen, Seen)
-					end
-				end
-
-				for Object, Box in Boxes do
-					if not Seen[Object] then
-						Box:Destroy()
-						Boxes[Object] = nil
-						Kinds[Box] = nil
-					end
-				end
-			end
-
-			local Elapsed = 0
-			Context:Signal(RunService.Heartbeat, function(Delta)
-				Elapsed += Delta
-				if Elapsed < Constants.MapInterval then
-					return
-				end
-
-				Elapsed = 0
-
-				local Window = Core.Library.Window
-				if not Surface:IsDescendantOf(game) or (Window and Window.Root and not Window.Root.Visible) then
-					return
-				end
-
-				Sync()
-			end)
-
-			Sync()
-
-			return { Refresh = Sync }
-		end,
-	}
-end
-
-function Elements.Register(Core)
-	local Record = Core.Extension:Define({
-		Id = Constants.ExtensionId,
-		Name = "HUD Manager Elements",
-		Version = Constants.Version,
-		Author = "HUD Manager",
-		Description = "Status, precision pad, rule list and screen map elements for the HUD editor",
-		Tags = { "hud", "editor" },
-		Load = function(Api)
-			Api:Element("HudStatus", Elements.Status(Core))
-			Api:Element("HudNudgePad", Elements.NudgePad(Core))
-			Api:Element("HudRuleList", Elements.RuleList(Core))
-			Api:Element("HudScreenMap", Elements.ScreenMap(Core))
-
-			return { Version = Constants.Version }
+	self.Tabs = Kit.Segmented({
+		Parent = Fill,
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 30),
+		Options = { "Adjust", "Elements", "Map" },
+		Default = "Adjust",
+		Callback = function(Value)
+			self:SetAdvancedPage(Value)
 		end,
 	})
 
-	assert(Record.State == "Enabled", "HUDManager - element extension failed: " .. tostring(Record.Error))
-	return Record
+	local Pages = Kit.New("Frame", {
+		Name = "Pages",
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = 3,
+		Parent = Fill,
+	}, {
+		Kit.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }),
+	})
+
+	self.Pages = {
+		Adjust = self:BuildAdjustPage(Pages),
+		Elements = self:BuildElementsPage(Pages),
+		Map = self:BuildMapPage(Pages),
+	}
+
+	self:SetAdvancedPage("Adjust")
+end
+
+function Overlay:BuildAdjustPage(Parent)
+	local Core = self.Core
+	local Page = self:NewPage(Parent, "Adjust")
+
+	local _, SelectionRight = Kit.Row(Page, 1, "Selection")
+	self.AdvancedSelection = Kit.Label({
+		Parent = SelectionRight,
+		Text = "None",
+		Size = UDim2.new(1, 0, 0, 16),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Tag = "TextSecondary",
+		Weight = "Regular",
+	})
+
+	Kit.Divider(Page, 2, 6)
+
+	local MoveRow, MoveRight = Kit.Row(Page, 3, "Move")
+	MoveRow.Size = UDim2.new(1, 0, 0, 74)
+
+	local Pad = Kit.New("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.fromOffset(108, 63),
+		Parent = MoveRight,
+	})
+
+	local Cells = {
+		{ Icon = Constants.Icons.Up, Fallback = Constants.Glyphs.Up, Column = 1, Row = 0, X = 0, Y = -1 },
+		{ Icon = Constants.Icons.Left, Fallback = Constants.Glyphs.Left, Column = 0, Row = 1, X = -1, Y = 0 },
+		{ Icon = Constants.Icons.Down, Fallback = Constants.Glyphs.Down, Column = 1, Row = 1, X = 0, Y = 1 },
+		{ Icon = Constants.Icons.Right, Fallback = Constants.Glyphs.Right, Column = 2, Row = 1, X = 1, Y = 0 },
+	}
+
+	for _, Cell in Cells do
+		local Button = Kit.Button({
+			Parent = Pad,
+			Icon = Cell.Icon,
+			Fallback = Cell.Fallback,
+			Variant = "Subtle",
+			Size = UDim2.fromOffset(34, 30),
+			Position = UDim2.fromOffset(Cell.Column * 37, Cell.Row * 33),
+			IconSize = 16,
+		})
+
+		table.insert(self.Controls, Button)
+
+		self:Hold(Button, function()
+			local Step = Core.Settings.NudgeStep
+			Core:Nudge(Cell.X * Step, Cell.Y * Step)
+		end)
+	end
+
+	local _, StepRight = Kit.Row(Page, 4, "Step")
+	self.StepControl = Kit.Segmented({
+		Parent = StepRight,
+		Size = UDim2.fromOffset(152, 30),
+		Options = Constants.NudgeSteps,
+		Default = Core.Settings.NudgeStep,
+		Callback = function(Value)
+			Core.Settings.NudgeStep = Value
+		end,
+	})
+
+	Kit.Divider(Page, 5, 6)
+
+	local _, ResizeRight = Kit.Row(Page, 6, "Resize")
+	local _, ResizeButtons = Kit.Group(ResizeRight, 1, {
+		{ Icon = Constants.Icons.Minus, Fallback = Constants.Glyphs.Minus, Width = 34 },
+		{ Icon = Constants.Icons.Plus, Fallback = Constants.Glyphs.Plus, Width = 34 },
+	})
+
+	self:Hold(ResizeButtons[1], function()
+		Core:Resize(-Core.Settings.ResizeStep)
+	end)
+
+	self:Hold(ResizeButtons[2], function()
+		Core:Resize(Core.Settings.ResizeStep)
+	end)
+
+	local _, ElementRight = Kit.Row(Page, 7, "Element")
+	local _, ElementButtons = Kit.Group(ElementRight, 1, {
+		{ Text = "Reset", Width = 54 },
+		{ Text = "Hide", Width = 48, Variant = "MenuDanger" },
+	})
+
+	ElementButtons[1]:OnActivated(function()
+		Core:ResetSelected()
+	end)
+
+	ElementButtons[2]:OnActivated(function()
+		Core:DeleteSelected()
+	end)
+
+	for _, Button in ResizeButtons do
+		table.insert(self.Controls, Button)
+	end
+
+	for _, Button in ElementButtons do
+		table.insert(self.Controls, Button)
+	end
+
+	return Page
+end
+
+function Overlay:BuildElementsPage(Parent)
+	local Core = self.Core
+	local Page = self:NewPage(Parent, "Elements")
+	local Filter = "All"
+	local Rows = {}
+	local Pending = false
+	local ArmedAt = 0
+
+	local Summary = Kit.Label({
+		Parent = Page,
+		Text = "",
+		Size = UDim2.new(1, 0, 0, 22),
+		TextSize = 11,
+		Tag = "TextSecondary",
+		Weight = "Regular",
+		LayoutOrder = 1,
+	})
+	Kit.New("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = Summary })
+
+	local Rebuild
+
+	local function Schedule()
+		if Pending then
+			return
+		end
+
+		Pending = true
+		task.defer(function()
+			Pending = false
+			Rebuild()
+		end)
+	end
+
+	Kit.Segmented({
+		Parent = Page,
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 30),
+		Options = { "All", "Hidden", "Moved", "Resized" },
+		Default = Filter,
+		Callback = function(Value)
+			Filter = Value
+			Schedule()
+		end,
+	})
+
+	local List = Kit.New("ScrollingFrame", {
+		Name = "List",
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, 64),
+		ScrollBarThickness = 2,
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		CanvasSize = UDim2.new(),
+		LayoutOrder = 3,
+		ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
+		Parent = Page,
+	}, {
+		Kit.New("UIListLayout", {
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 4),
+		}),
+	})
+
+	local Empty = Kit.Label({
+		Parent = List,
+		Text = "Nothing modified yet",
+		Size = UDim2.new(1, 0, 0, 56),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Tag = "TextSecondary",
+		Weight = "Regular",
+	})
+
+	local function Matches(Rule)
+		if Filter == "Hidden" then
+			return Rule.IsDeleted
+		elseif Filter == "Moved" then
+			return not Rule.IsDeleted
+		elseif Filter == "Resized" then
+			return Rule.SizeModified
+		end
+
+		return true
+	end
+
+	local function Describe(Rule)
+		if Rule.IsDeleted then
+			return "Hidden"
+		end
+
+		return if Rule.SizeModified then "Moved and resized" else "Moved"
+	end
+
+	local function CreateRow(Key, Rule, Order)
+		local Stroke = Kit.New("UIStroke", {
+			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+			Thickness = 1,
+			ThemeTag = { Color = "ElementBorder" },
+		})
+		Kit.Track(Stroke, "Transparency", 0.92)
+
+		local Row = Kit.New("Frame", {
+			Size = UDim2.new(1, -4, 0, 40),
+			LayoutOrder = Order,
+			ThemeTag = { BackgroundColor3 = "DropdownFrame" },
+			Parent = List,
+		}, {
+			Kit.Corner(8),
+			Stroke,
+		})
+		Kit.Track(Row, "BackgroundTransparency", 0.94)
+
+		Kit.New("Frame", {
+			Name = "Marker",
+			AnchorPoint = Vector2.new(0, 0.5),
+			Position = UDim2.new(0, 7, 0.5, 0),
+			Size = UDim2.fromOffset(3, 20),
+			BorderSizePixel = 0,
+			ThemeTag = { BackgroundColor3 = if Rule.IsDeleted then "Danger" else "Accent" },
+			Parent = Row,
+		}, { Kit.Corner(2) })
+
+		Kit.Label({
+			Parent = Row,
+			Text = Rule.Name,
+			Position = UDim2.fromOffset(18, 5),
+			Size = UDim2.new(1, -86, 0, 16),
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Weight = "SemiBold",
+		})
+
+		Kit.Label({
+			Parent = Row,
+			Text = Describe(Rule),
+			Position = UDim2.fromOffset(18, 21),
+			Size = UDim2.new(1, -86, 0, 14),
+			TextSize = 11,
+			Tag = if Rule.IsDeleted then "Danger" else "TextSecondary",
+			Weight = "Regular",
+		})
+
+		local Restore = Kit.Button({
+			Parent = Row,
+			Icon = Constants.Icons.Reset,
+			Fallback = Constants.Glyphs.Reset,
+			Variant = "Menu",
+			Size = UDim2.fromOffset(26, 26),
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, -6, 0.5, 0),
+			IconSize = 14,
+			Radius = 7,
+		})
+		Restore:OnActivated(function()
+			Core:RestoreKey(Key)
+		end)
+
+		if not Rule.IsDeleted then
+			local Focus = Kit.Button({
+				Parent = Row,
+				Icon = Constants.Icons.Focus,
+				Fallback = Constants.Glyphs.Focus,
+				Variant = "Menu",
+				Size = UDim2.fromOffset(26, 26),
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, -36, 0.5, 0),
+				IconSize = 14,
+				Radius = 7,
+			})
+			Focus:OnActivated(function()
+				Core:FocusKey(Key)
+			end)
+		end
+
+		table.insert(Rows, Row)
+	end
+
+	Rebuild = function()
+		if not Core.Started then
+			return
+		end
+
+		for _, Row in Rows do
+			Row:Destroy()
+		end
+		table.clear(Rows)
+
+		local Order = 0
+		for _, Key in Util.SortedKeys(Core.Book.Rules) do
+			local Rule = Core.Book.Rules[Key]
+			if Matches(Rule) then
+				Order += 1
+				CreateRow(Key, Rule, Order)
+			end
+		end
+
+		Empty.Visible = Order == 0
+		List.Size = UDim2.new(1, 0, 0, math.clamp(Order * 44, 64, 200))
+
+		local Counts = Core.Book:Counts()
+		Summary.Text = string.format(
+			"%d modified  |  %d hidden  |  %d resized  |  %d in history",
+			Counts.Total,
+			Counts.Hidden,
+			Counts.Resized,
+			#Core.History.Undos
+		)
+	end
+
+	local Reset = Kit.Button({
+		Parent = Page,
+		Text = "Reset all changes",
+		Variant = "Danger",
+		Size = UDim2.new(1, 0, 0, 30),
+		LayoutOrder = 4,
+	})
+
+	Reset:OnActivated(function()
+		if Core.Book:Counts().Total == 0 then
+			return Core:Toast("There is nothing to reset")
+		end
+
+		if ArmedAt > 0 and os.clock() - ArmedAt < 3 then
+			ArmedAt = 0
+			Reset:SetText("Reset all changes")
+			return Core:ResetAll()
+		end
+
+		local Stamp = os.clock()
+		ArmedAt = Stamp
+		Reset:SetText("Tap again to confirm")
+
+		task.delay(3, function()
+			if ArmedAt == Stamp then
+				ArmedAt = 0
+				Reset:SetText("Reset all changes")
+			end
+		end)
+	end)
+
+	self:Listen(Core.Book.Changed, Schedule)
+	self:Listen(Core.History.Changed, Schedule)
+	Rebuild()
+
+	return Page
+end
+
+function Overlay:BuildMapPage(Parent)
+	local Page = self:NewPage(Parent, "Map")
+	local Viewport = Util.GetViewport()
+
+	local Body = Kit.New("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 180),
+		LayoutOrder = 1,
+		Parent = Page,
+	})
+
+	local Stroke = Kit.New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		ThemeTag = { Color = "ElementBorder" },
+	})
+	Kit.Track(Stroke, "Transparency", 0.85)
+
+	local Surface = Kit.New("Frame", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromScale(1, 1),
+		ClipsDescendants = true,
+		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
+		Parent = Body,
+	}, {
+		Kit.Corner(8),
+		Stroke,
+		Kit.New("UIAspectRatioConstraint", {
+			AspectRatio = Viewport.X / math.max(Viewport.Y, 1),
+			DominantAxis = Enum.DominantAxis.Height,
+			AspectType = Enum.AspectType.FitWithinMaxSize,
+		}),
+	})
+	Kit.Track(Surface, "BackgroundTransparency", 0.94)
+
+	local Legend = Kit.Label({
+		Parent = Page,
+		Text = "Accent is selected, gray is moved, red is hidden. Tap a block to focus it.",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		TextWrapped = true,
+		TextSize = 11,
+		Tag = "TextSecondary",
+		Weight = "Regular",
+		LayoutOrder = 2,
+	})
+	Kit.New("UIPadding", {
+		PaddingLeft = UDim.new(0, 8),
+		PaddingRight = UDim.new(0, 8),
+		PaddingTop = UDim.new(0, 4),
+		Parent = Legend,
+	})
+
+	self.Map = {
+		Surface = Surface,
+		Boxes = {},
+		Kinds = {},
+		Palette = {
+			Selected = { Background = "Accent", Transparency = 0.35 },
+			Moved = { Background = "SubText", Transparency = 0.7 },
+			Hidden = { Background = "Danger", Transparency = 0.7 },
+		},
+	}
+
+	return Page
+end
+
+function Overlay:DrawMap(Object, Kind, Screen, Seen)
+	local Map = self.Map
+
+	if not Object.Parent or Seen[Object] then
+		return
+	end
+
+	Seen[Object] = true
+
+	local Box = Map.Boxes[Object]
+	if not Box then
+		Box = Kit.New("TextButton", {
+			Text = "",
+			AutoButtonColor = false,
+			BorderSizePixel = 0,
+			ThemeTag = { BackgroundColor3 = Map.Palette[Kind].Background },
+			Parent = Map.Surface,
+		})
+		Box.Activated:Connect(function()
+			self.Core:FocusObject(Object)
+		end)
+		Map.Boxes[Object] = Box
+	end
+
+	if Map.Kinds[Box] ~= Kind then
+		Map.Kinds[Box] = Kind
+		Kit.Retag(Box, { BackgroundColor3 = Map.Palette[Kind].Background })
+		Box.BackgroundTransparency = Map.Palette[Kind].Transparency
+	end
+
+	local Position = Geometry.ScreenPosition(Object)
+	local Size = Object.AbsoluteSize
+
+	Box.Position = UDim2.fromScale(Position.X / Screen.X, Position.Y / Screen.Y)
+	Box.Size = UDim2.fromScale(math.max(Size.X / Screen.X, 0.008), math.max(Size.Y / Screen.Y, 0.008))
+end
+
+function Overlay:SyncMap()
+	local Map = self.Map
+	local Screen = self.Core.Library.GUI.AbsoluteSize
+
+	if Screen.X <= 0 or Screen.Y <= 0 then
+		return
+	end
+
+	local Seen = {}
+	local Session = self.Core.Session
+
+	if Session.Selected then
+		self:DrawMap(Session.Selected, "Selected", Screen, Seen)
+	end
+
+	for _, Member in Session.Cluster do
+		self:DrawMap(Member, "Selected", Screen, Seen)
+	end
+
+	for Object, Key in self.Core.Book.Tracked do
+		local Rule = self.Core.Book.Rules[Key]
+		if Rule then
+			self:DrawMap(Object, if Rule.IsDeleted then "Hidden" else "Moved", Screen, Seen)
+		end
+	end
+
+	for Object, Box in Map.Boxes do
+		if not Seen[Object] then
+			Box:Destroy()
+			Map.Boxes[Object] = nil
+			Map.Kinds[Box] = nil
+		end
+	end
+end
+
+function Overlay:Tick()
+	if not self.Advanced.Visible or self.ActivePage ~= "Map" then
+		return
+	end
+
+	local Now = os.clock()
+	if Now - (self.LastMap or 0) < Constants.MapInterval then
+		return
+	end
+
+	self.LastMap = Now
+	self:SyncMap()
+end
+
+function Overlay:SetAdvancedPage(Name)
+	self.ActivePage = Name
+
+	for Key, Page in self.Pages do
+		Page.Visible = Key == Name
+	end
+
+	if Name == "Map" then
+		self:SyncMap()
+	end
+end
+
+function Overlay:SetAdvancedVisible(Visible)
+	self.Advanced.Visible = Visible
+	self.AdvancedButton:SetVariant(if Visible then "Active" else "Menu")
+
+	if Visible and self.ActivePage == "Map" then
+		self:SyncMap()
+	end
+end
+
+function Overlay:ToggleAdvanced()
+	self:SetAdvancedVisible(not self.Advanced.Visible)
 end
 
 local function NewSession()
@@ -2793,7 +3272,6 @@ function HUDManager:Start()
 	end
 
 	assert(self.Library, "HUDManager - Library is not set, call SetLibrary first")
-	assert(self.Extension, "HUDManager - Extension is not set, call SetExtension first")
 
 	Kit.Bind(self.Library)
 
@@ -2806,14 +3284,6 @@ function HUDManager:Start()
 	self:BuildFolderTree()
 
 	self.Overlay = Overlay.new(self)
-	self.ExtensionRecord = Elements.Register(self)
-
-	table.insert(
-		self.Connections,
-		UserInputService.InputBegan:Connect(function(Input)
-			self:OnInputBegan(Input)
-		end)
-	)
 
 	table.insert(
 		self.Connections,
@@ -2896,20 +3366,16 @@ function HUDManager:Destroy(Restore)
 		self.Overlay = nil
 	end
 
-	pcall(function()
-		self.Extension:Remove(Constants.ExtensionId)
-	end)
-
 	self.Session = NewSession()
 	self.Signals.StateChanged:Fire(false)
 end
 
-function HUDManager:OnInputBegan(Input)
+function HUDManager:OnShieldPressed(Input)
 	if not Util.IsPointer(Input) or not self.Session.EditMode then
 		return
 	end
 
-	if self.Overlay:IsConfirmOpen() or self.Overlay:IsInterfaceHit(Input.Position) then
+	if self:IsOverWindow() then
 		return
 	end
 
@@ -2920,6 +3386,15 @@ function HUDManager:OnInputBegan(Input)
 	else
 		self:ClearSelection()
 	end
+end
+
+function HUDManager:IsOverWindow()
+	local Window = self.Library.Window
+	if not (Window and Window.Root and Window.Root.Visible) then
+		return false
+	end
+
+	return Util.PointInGui(UserInputService:GetMouseLocation(), Window.Root)
 end
 
 function HUDManager:OnInputChanged(Input)
@@ -3029,11 +3504,6 @@ function HUDManager:SetEditMode(Enabled)
 
 	self.Overlay:SetEditState(Enabled)
 	self.Signals.StateChanged:Fire(Enabled)
-
-	local Toggle = self.Library.Options.HudEditMode
-	if Toggle and Toggle.Value ~= Enabled then
-		Toggle:SetValue(Enabled)
-	end
 end
 
 function HUDManager:SetBarLocked(Locked)
@@ -3123,8 +3593,23 @@ function HUDManager:EndDrag()
 	Session.DragBefore = {}
 end
 
+function HUDManager:IsDragging()
+	local Input = self.Session.DragInput
+	if not Input then
+		return false
+	end
+
+	local State = Input.UserInputState
+	if State == Enum.UserInputState.End or State == Enum.UserInputState.Cancel then
+		self:EndDrag()
+		return false
+	end
+
+	return true
+end
+
 function HUDManager:Mutate(Label, Mutator, Merge)
-	if not self:RequireSelection() or self.Session.DragInput then
+	if not self:RequireSelection() or self:IsDragging() then
 		return false
 	end
 
@@ -3177,6 +3662,16 @@ function HUDManager:Resize(Delta)
 		local Size = Rule.Size
 		Rule.Size = UDim2.new(Size.X.Scale, Size.X.Offset + Delta, Size.Y.Scale, Size.Y.Offset + Delta)
 		Rule.SizeModified = true
+
+		local Anchor = Object.AnchorPoint
+		local Position = Rule.Position
+		Rule.Position = UDim2.new(
+			Position.X.Scale,
+			Position.X.Offset + math.round((Anchor.X - 0.5) * Delta),
+			Position.Y.Scale,
+			Position.Y.Offset + math.round((Anchor.Y - 0.5) * Delta)
+		)
+
 		return true
 	end, true)
 end
@@ -3390,76 +3885,16 @@ function HUDManager:Confirm(Title, Content, Label, Action)
 	})
 end
 
-function HUDManager:BuildEditorSection(Tab)
+function HUDManager:BuildConfigSection(Tab)
 	self:Start()
 
-	local Library = self.Library
 	local Settings = self.Settings
-	local Section = Tab:AddSection("HUD editor", { Icon = "tabler:pencil" })
+	local Section = Tab:AddSection("Configuration", { Icon = "lucide:sliders-horizontal" })
 
-	Section:AddToggle("HudEditMode", {
-		Title = "Edit mode",
-		Description = "Tap, drag, resize or hide any on-screen UI",
-		Icon = "tabler:pencil",
-		Default = false,
-		Callback = function(Value)
-			self:SetEditMode(Value)
-		end,
-	})
-
-	Section:AddHudStatus({ Title = "Overview" })
-
-	Section:AddButton({
-		Title = "Undo",
-		Description = "Revert the last change",
-		Variant = "Tonal",
-		ButtonText = "Undo",
-		ButtonIcon = "tabler:arrow-back-up",
-		Callback = function()
-			self:Undo()
-		end,
-	})
-
-	Section:AddButton({
-		Title = "Redo",
-		Description = "Re-apply the change you just undid",
-		Variant = "Tonal",
-		ButtonText = "Redo",
-		ButtonIcon = "tabler:arrow-forward-up",
-		Callback = function()
-			self:Redo()
-		end,
-	})
-
-	Section:AddHudNudgePad("HudNudgePad", {
-		Title = "Precision pad",
-		Description = "Move, resize or hide the selected element",
-		Default = Settings.NudgeStep,
-	})
-
-	Section:AddButton({
-		Title = "Reset everything",
-		Description = "Put every modified element back where it was",
-		Variant = "Danger",
-		ButtonText = "Reset all",
-		ButtonIcon = "tabler:trash",
-		Callback = function()
-			if self.Book:Counts().Total == 0 then
-				return self:Toast("There is nothing to reset")
-			end
-
-			self:Confirm("Reset everything", "Every moved, resized or hidden element goes back to its original state.", "Reset", function()
-				self:ResetAll()
-			end)
-		end,
-	})
-
-	local Behavior = Tab:AddSection("Behavior", { Icon = "tabler:adjustments" })
-
-	Behavior:AddToggle("HudShowLauncher", {
+	Section:AddToggle("HudShowLauncher", {
 		Title = "Floating launcher",
-		Description = "Show the draggable button that opens the on-screen dock",
-		Icon = "tabler:circle-dot",
+		Description = "Show the draggable button that opens the quick dock",
+		Icon = "lucide:circle-dot",
 		Default = Settings.ShowLauncher,
 		Callback = function(Value)
 			Settings.ShowLauncher = Value
@@ -3469,17 +3904,17 @@ function HUDManager:BuildEditorSection(Tab)
 		end,
 	})
 
-	Behavior:AddToggle("HudGroupCluster", {
+	Section:AddToggle("HudGroupCluster", {
 		Title = "Move linked elements together",
 		Description = "Elements that share the same center are edited as one",
-		Icon = "tabler:link",
+		Icon = "lucide:link",
 		Default = Settings.GroupCluster,
 		Callback = function(Value)
 			Settings.GroupCluster = Value
 		end,
 	})
 
-	Behavior:AddSegmented("HudSelectionMode", {
+	Section:AddSegmented("HudSelectionMode", {
 		Title = "Selection mode",
 		Description = "Smart climbs to the whole button, Exact picks the layer you tapped",
 		Options = { "Smart", "Exact" },
@@ -3489,7 +3924,7 @@ function HUDManager:BuildEditorSection(Tab)
 		end,
 	})
 
-	Behavior:AddSegmented("HudAxis", {
+	Section:AddSegmented("HudAxis", {
 		Title = "Drag axis",
 		Description = "Restrict dragging to a single direction",
 		Options = { "Free", "Horizontal", "Vertical" },
@@ -3499,10 +3934,10 @@ function HUDManager:BuildEditorSection(Tab)
 		end,
 	})
 
-	Behavior:AddSlider("HudResizeStep", {
+	Section:AddSlider("HudResizeStep", {
 		Title = "Resize step",
 		Description = "Pixels added or removed by the size buttons",
-		Icon = "tabler:arrows-maximize",
+		Icon = "lucide:maximize-2",
 		Min = 1,
 		Max = 50,
 		Default = Settings.ResizeStep,
@@ -3510,13 +3945,16 @@ function HUDManager:BuildEditorSection(Tab)
 		Suffix = " px",
 		Callback = function(Value)
 			Settings.ResizeStep = Value
+			if self.Overlay then
+				self.Overlay:SetResizeStep(Value)
+			end
 		end,
 	})
 
-	Behavior:AddSlider("HudSnapSize", {
+	Section:AddSlider("HudSnapSize", {
 		Title = "Snap to grid",
 		Description = "Round drag distance to this many pixels, 0 turns it off",
-		Icon = "tabler:grid-dots",
+		Icon = "lucide:grid",
 		Min = 0,
 		Max = 50,
 		Default = Settings.SnapSize,
@@ -3526,33 +3964,30 @@ function HUDManager:BuildEditorSection(Tab)
 			Settings.SnapSize = Value
 		end,
 	})
-
-	Behavior:AddSegmented("HudLoadMode", {
-		Title = "Profile loading",
-		Description = "Replace restores everything first, Merge keeps current changes",
-		Options = { "Replace", "Merge" },
-		Default = Settings.LoadMode,
-		Callback = function(Value)
-			Settings.LoadMode = Value
-		end,
-	})
-
-	self:IgnoreSaveIndexes({ "HudEditMode" })
-	return Library.Options.HudEditMode
 end
 
 function HUDManager:BuildProfileSection(Tab)
 	self:Start()
 
 	local Library = self.Library
-	local Section = Tab:AddSection("HUD profiles", { Icon = "tabler:folder" })
+	local Section = Tab:AddSection("Saving", { Icon = "lucide:save" })
 	local AutoloadButton
+
+	Section:AddSegmented("HudLoadMode", {
+		Title = "Profile loading",
+		Description = "Replace restores everything first, Merge keeps current changes",
+		Options = { "Replace", "Merge" },
+		Default = self.Settings.LoadMode,
+		Callback = function(Value)
+			self.Settings.LoadMode = Value
+		end,
+	})
 
 	Section:AddInput("HudProfileName", {
 		Title = "Profile name",
 		Description = "Name for a new profile",
 		Variant = "Field",
-		Icon = "feather:edit-2",
+		Icon = "lucide:pencil",
 		Placeholder = "My HUD",
 		Finished = false,
 	})
@@ -3560,7 +3995,7 @@ function HUDManager:BuildProfileSection(Tab)
 	Section:AddDropdown("HudProfileList", {
 		Title = "Saved profiles",
 		Description = "Profiles stored for this game",
-		Icon = "tabler:folder-open",
+		Icon = "lucide:folder-open",
 		Variant = "Compact",
 		Values = ProfileStore.List(self),
 		AllowNull = true,
@@ -3595,7 +4030,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Save the current layout as a new profile",
 		Variant = "Primary",
 		ButtonText = "Create",
-		ButtonIcon = "feather:save",
+		ButtonIcon = "lucide:save",
 		Callback = function()
 			local Name = Util.SanitizeName(Library.Options.HudProfileName.Value)
 
@@ -3623,7 +4058,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Apply the selected profile",
 		Variant = "Tonal",
 		ButtonText = "Load",
-		ButtonIcon = "feather:download",
+		ButtonIcon = "lucide:download",
 		Callback = function()
 			local Name = Selected()
 			local Success, Problem = self:LoadProfile(Name)
@@ -3641,7 +4076,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Replace the selected profile with the current layout",
 		Variant = "Outline",
 		ButtonText = "Overwrite",
-		ButtonIcon = "feather:refresh-cw",
+		ButtonIcon = "lucide:refresh-cw",
 		Callback = function()
 			local Name = Selected()
 
@@ -3670,7 +4105,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Delete the selected profile",
 		Variant = "Danger",
 		ButtonText = "Delete",
-		ButtonIcon = "tabler:trash",
+		ButtonIcon = "lucide:trash",
 		Callback = function()
 			local Name = Selected()
 
@@ -3695,7 +4130,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Title = "Refresh list",
 		Variant = "Ghost",
 		ButtonText = "Refresh",
-		ButtonIcon = "feather:rotate-cw",
+		ButtonIcon = "lucide:rotate-cw",
 		Callback = Refresh,
 	})
 
@@ -3704,7 +4139,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Current autoload profile: none",
 		Variant = "Accent",
 		ButtonText = "Toggle",
-		ButtonIcon = "tabler:rocket",
+		ButtonIcon = "lucide:rocket",
 		Callback = function()
 			local Name = Selected()
 			local Current = ProfileStore.GetAutoload(self)
@@ -3728,14 +4163,14 @@ function HUDManager:BuildProfileSection(Tab)
 		end,
 	})
 
-	local Share = Tab:AddSection("Share and migrate", { Icon = "tabler:share" })
+	local Share = Tab:AddSection("Share and migrate", { Icon = "lucide:share" })
 
 	Share:AddButton({
 		Title = "Copy profile",
 		Description = "Copy the selected profile as JSON to your clipboard",
 		Variant = "Tonal",
 		ButtonText = "Copy",
-		ButtonIcon = "tabler:copy",
+		ButtonIcon = "lucide:copy",
 		Callback = function()
 			local Name = Selected()
 
@@ -3756,7 +4191,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Title = "Profile JSON",
 		Description = "Paste a copied profile, then press Import",
 		Variant = "Field",
-		Icon = "tabler:clipboard",
+		Icon = "lucide:clipboard",
 		Placeholder = "Paste JSON",
 		Finished = false,
 	})
@@ -3766,7 +4201,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Save the pasted JSON under the profile name above",
 		Variant = "Primary",
 		ButtonText = "Import",
-		ButtonIcon = "tabler:file-import",
+		ButtonIcon = "lucide:file-input",
 		Callback = function()
 			local Success, Result = ProfileStore.ImportText(
 				self,
@@ -3788,7 +4223,7 @@ function HUDManager:BuildProfileSection(Tab)
 		Description = "Bring in saves made by the old Perfect UI Manager",
 		Variant = "Outline",
 		ButtonText = "Import",
-		ButtonIcon = "tabler:history",
+		ButtonIcon = "lucide:history",
 		Callback = function()
 			local Count = ProfileStore.ImportLegacy(self)
 
@@ -3805,27 +4240,8 @@ function HUDManager:BuildProfileSection(Tab)
 	self:IgnoreSaveIndexes({ "HudProfileName", "HudProfileList", "HudProfileImport" })
 end
 
-function HUDManager:BuildInspectorSection(Tab)
-	self:Start()
-
-	local Section = Tab:AddSection("HUD inspector", { Icon = "tabler:list-details" })
-
-	Section:AddHudScreenMap({
-		Title = "Screen map",
-		Description = "Blue is selected, gray is moved, red is hidden. Tap a block to focus it",
-		Height = 170,
-	})
-
-	Section:AddHudRuleList({
-		Title = "Modified elements",
-		Description = "Everything you moved, resized or hid",
-		Height = 240,
-	})
-end
-
 function HUDManager:BuildSection(Tab)
-	self:BuildEditorSection(Tab)
-	self:BuildInspectorSection(Tab)
+	self:BuildConfigSection(Tab)
 	self:BuildProfileSection(Tab)
 end
 
