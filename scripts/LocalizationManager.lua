@@ -38,6 +38,39 @@ local Languages: { LanguageInfo } = {
 }
 
 
+local FlagColors: { [string]: Color3 } = {
+	en = Color3.fromRGB(60, 100, 200),
+	vi = Color3.fromRGB(218, 37, 29),
+	["zh-cn"] = Color3.fromRGB(238, 28, 37),
+	["zh-tw"] = Color3.fromRGB(30, 80, 180),
+	ja = Color3.fromRGB(188, 0, 45),
+	ko = Color3.fromRGB(30, 100, 200),
+	th = Color3.fromRGB(165, 25, 49),
+	id = Color3.fromRGB(206, 17, 38),
+	ms = Color3.fromRGB(255, 204, 0),
+	fil = Color3.fromRGB(0, 56, 168),
+	fr = Color3.fromRGB(0, 85, 164),
+	de = Color3.fromRGB(255, 204, 0),
+	es = Color3.fromRGB(241, 191, 0),
+	pt = Color3.fromRGB(0, 150, 70),
+	it = Color3.fromRGB(0, 146, 70),
+	nl = Color3.fromRGB(174, 28, 40),
+	pl = Color3.fromRGB(220, 20, 60),
+	ru = Color3.fromRGB(0, 57, 166),
+	uk = Color3.fromRGB(255, 213, 0),
+	tr = Color3.fromRGB(227, 10, 23),
+	ar = Color3.fromRGB(0, 122, 61),
+	hi = Color3.fromRGB(255, 153, 51),
+	bn = Color3.fromRGB(0, 106, 78),
+	ur = Color3.fromRGB(0, 128, 60),
+	fa = Color3.fromRGB(35, 159, 64),
+	he = Color3.fromRGB(0, 56, 184),
+	el = Color3.fromRGB(13, 94, 175),
+	ro = Color3.fromRGB(252, 209, 22),
+	sv = Color3.fromRGB(0, 106, 167),
+	da = Color3.fromRGB(198, 12, 48),
+}
+
 local GoogleLanguageCodes: { [string]: string } = { ["zh-cn"] = "zh-CN", ["zh-tw"] = "zh-TW" }
 
 local DefaultMessages: { [string]: MessageSet } = {
@@ -1513,7 +1546,8 @@ function LocalizationManager:Localization(Config: any)
 	end
 	for _, Language in ipairs(self.Languages) do
 		table.insert(Codes, Language.Code)
-		table.insert(Terms, Language.Name .. " [" .. Language.Code .. "]")
+		table.insert(Terms, Language.Name)
+		table.insert(Terms, Language.Code:upper())
 	end
 	Options.NoTranslations = Terms
 	Options.Languages = Options.Languages or Codes
@@ -1688,10 +1722,13 @@ function LocalizationManager:AddDropdown(Host: any, Options: any?)
 	Options = CopyTable(Options)
 	local Entry = { Syncing = true, Labels = {} }
 	local Values: { string }, Reverse: { [string]: string } = {}, {}
+	local Tags: { [string]: any }, ItemTags: { [string]: string } = {}, {}
 	for _, Language in ipairs(self.Languages) do
-		local Label = Language.Name .. " [" .. Language.Code .. "]"
+		local Label = Language.Name
 		table.insert(Values, Label)
 		Reverse[Label], Entry.Labels[Language.Code] = Language.Code, Label
+		Tags[Language.Code] = { Text = Language.Code:upper(), Color = Language.Color or FlagColors[Language.Code] }
+		ItemTags[Label] = Language.Code
 	end
 	local Index = Options.Idx or "ModulesLanguage"
 	local UserCallback = Options.Callback
@@ -1702,6 +1739,8 @@ function LocalizationManager:AddDropdown(Host: any, Options: any?)
 		Icon = Options.Icon or "rbxassetid://10723417703",
 		IconColor = Options.IconColor,
 		Values = Values,
+		Tags = Tags,
+		ItemTags = ItemTags,
 		Default = Entry.Labels[self:GetLanguage()] or Values[1],
 		Searchable = Options.Searchable ~= false,
 		Width = Options.Width or 190,
