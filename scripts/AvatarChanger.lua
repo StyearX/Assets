@@ -33,6 +33,8 @@ export type Options = {
 	PreviewAutoRotate: boolean,
 	PreviewCacheLimit: number,
 	ToggleKey: string,
+	EvadeMode: string,
+	EvadeHideFirstPerson: boolean,
 }
 
 export type Connection = {
@@ -2913,9 +2915,14 @@ type RigProfile = {
 	Parts: { [string]: BasePart },
 	Source: string,
 	Score: number,
+	Evade: boolean?,
+	Bound: boolean?,
+	Pending: boolean?,
+	Tag: any?,
 }
 
 local RigResolver = {}
+local EvadeRig = {}
 
 local function IsGearDescendant(Object: Instance, Root: Instance): boolean
 	local Current = Object.Parent
@@ -3071,6 +3078,12 @@ function RigResolver.Collect(Player: Player, CustomPath: string?): { RigProfile 
 		for Path in string.gmatch(Trimmed, "[^;]+") do
 			ConsiderPath(Util.Trim(Path), "Custom", 100)
 		end
+	elseif EvadeRig.IsEnabled() then
+		local Profile = EvadeRig.Profile(Player)
+		if Profile and not Seen[Profile.Model] then
+			Seen[Profile.Model] = true
+			table.insert(Results, Profile)
+		end
 	end
 
 	local Preset = GamePresets[game.PlaceId]
@@ -3111,6 +3124,9 @@ function RigResolver.Resolve(Player: Player, CustomPath: string?): (RigProfile?,
 	if Best then
 		return Best, "ok"
 	end
+	if EvadeRig.IsEnabled() and Util.Trim(CustomPath) == "" then
+		return nil, "Your Evade rig is not in Workspace.Rigs yet. Wait until your character has spawned, then try again."
+	end
 	return nil,
 		"No rig with a Head and Torso was found for your player. Set a rig path in Options, for example Workspace.Rigs.{Name}."
 end
@@ -3121,9 +3137,10 @@ function RigResolver.WaitFor(
 	Timeout: number,
 	Cancelled: () -> boolean
 ): (RigProfile?, string)
-	local Deadline = os.clock() + Timeout
+	local Started = os.clock()
+	local Deadline = Started + Timeout
 	local Profile, Reason = RigResolver.Resolve(Player, CustomPath)
-	while not Profile and os.clock() < Deadline do
+	while os.clock() < Deadline and (not Profile or EvadeRig.IsPending(Profile, Started)) do
 		if Cancelled() then
 			return nil, "superseded"
 		end
@@ -3134,12 +3151,278 @@ function RigResolver.WaitFor(
 end
 
 function RigResolver.Describe(Profile: RigProfile): string
+	if Profile.Evade then
+		return EvadeRig.Describe(Profile)
+	end
 	local Count = 0
 	for _ in Profile.Parts do
 		Count += 1
 	end
 	local HumanoidText = if Profile.Humanoid then "yes" else "no"
 	return `{Profile.Model:GetFullName()} | {Profile.Kind} | {Profile.Source} | {Count} body parts | Humanoid: {HumanoidText}`
+end
+
+local EvadeSettings = table.freeze({
+	RigFolder = "Rigs",
+	CacheFolder = "PlayerCache",
+	CharacterFolder = "Players",
+	ParkedHeight = 40000,
+	BindTimeout = 6,
+	FirstPersonZoom = 1,
+})
+
+local EvadeModes = table.freeze({ "Auto", "Off" })
+
+local EvadeGuardedProperties = table.freeze({
+	"RigType",
+	"EvaluateStateMachine",
+	"RequiresNeck",
+	"BreakJointsOnDeath",
+	"DisplayDistanceType",
+	"AutomaticScalingEnabled",
+})
+
+type EvadeGuard = {
+	Humanoid: Humanoid?,
+	Properties: { [string]: any },
+	Children: { Instance },
+	Joints: Instance?,
+	JointChildren: { Instance },
+}
+
+EvadeRig.Modes = EvadeModes
+EvadeRig.Mode = "Auto"
+EvadeRig.HideFirstPerson = true
+
+function EvadeRig.SetMode(Value: any)
+	EvadeRig.Mode = if table.find(EvadeModes, Value) then Value else "Auto"
+end
+
+function EvadeRig.Detect(): boolean
+	local Services = ReplicatedStorage:FindFirstChild("Services")
+	local Asset = Services and Services:FindFirstChild("Asset")
+	return Asset ~= nil
+		and Asset:FindFirstChild("RigService") ~= nil
+		and Workspace:FindFirstChild(EvadeSettings.RigFolder) ~= nil
+		and Workspace:FindFirstChild(EvadeSettings.CacheFolder) ~= nil
+end
+
+function EvadeRig.IsEnabled(): boolean
+	return EvadeRig.Mode ~= "Off" and EvadeRig.Detect()
+end
+
+function EvadeRig.GetFolder(): Instance?
+	return Workspace:FindFirstChild(EvadeSettings.RigFolder)
+end
+
+function EvadeRig.FindCharacter(Player: Player): Model?
+	local Character = Player.Character
+	if Character and Character.Parent then
+		return Character
+	end
+	local Folder = Workspace:FindFirstChild(EvadeSettings.CharacterFolder)
+	local Found = Folder and Folder:FindFirstChild(Player.Name)
+	if Found and Found:IsA("Model") then
+		return Found
+	end
+	return nil
+end
+
+function EvadeRig.IsParked(Model: Model): boolean
+	local Head = Model:FindFirstChild("Head")
+	return Head ~= nil
+		and Head:IsA("BasePart")
+		and Head.Anchored
+		and Head.Position.Y >= EvadeSettings.ParkedHeight
+end
+
+function EvadeRig.FindModel(Player: Player): (Model?, boolean)
+	local Folder = EvadeRig.GetFolder()
+	if not Folder then
+		return nil, false
+	end
+	local Character = EvadeRig.FindCharacter(Player)
+	local Tag = if Character then Character:GetAttribute("Tag") else nil
+	local Fallback: Model? = nil
+	local FallbackParked = false
+	for _, Child in Folder:GetChildren() do
+		if not Child:IsA("Model") or Child.Name ~= Player.Name then
+			continue
+		end
+		local Parked = EvadeRig.IsParked(Child)
+		if Tag ~= nil and not Parked and Child:GetAttribute("Tag") == Tag then
+			return Child, true
+		end
+		if not Fallback or (Parked and not FallbackParked) then
+			Fallback, FallbackParked = Child, Parked
+		end
+	end
+	return Fallback, false
+end
+
+function EvadeRig.Profile(Player: Player): RigProfile?
+	local Model, Bound = EvadeRig.FindModel(Player)
+	if not Model then
+		return nil
+	end
+	local Profile = RigResolver.Evaluate(Model, Player, "Evade", if Bound then 200 else 120)
+	if not Profile then
+		return nil
+	end
+	local Character = EvadeRig.FindCharacter(Player)
+	local Expected = Character ~= nil and Character:GetAttribute("Tag") ~= nil
+	Profile.Evade = true
+	Profile.Bound = Bound
+	Profile.Pending = Expected and not Bound
+	Profile.Tag = Model:GetAttribute("Tag")
+	return Profile
+end
+
+function EvadeRig.IsPending(Profile: RigProfile, Started: number): boolean
+	return Profile.Evade == true
+		and Profile.Pending == true
+		and os.clock() - Started < EvadeSettings.BindTimeout
+end
+
+function EvadeRig.State(Profile: RigProfile): string
+	if Profile.Bound then
+		return "bound"
+	end
+	if EvadeRig.IsParked(Profile.Model) then
+		return "parked"
+	end
+	return "waiting for bind"
+end
+
+function EvadeRig.Describe(Profile: RigProfile): string
+	local Count = 0
+	for _ in Profile.Parts do
+		Count += 1
+	end
+	local Scale = Profile.Model:GetAttribute("Scale")
+	local ScaleText = if type(Scale) == "number" then string.format(" | Scale %.2f", Scale) else ""
+	local Humanoid = Profile.Humanoid
+	local CustomText = if Humanoid and not Humanoid:FindFirstChildOfClass("HumanoidDescription")
+		then " | Custom character rig"
+		else ""
+	local HumanoidText = if Humanoid then "yes" else "no"
+	return `{Profile.Model:GetFullName()} | {Profile.Kind} | Evade {EvadeRig.State(Profile)} | Tag {tostring(Profile.Tag)}{ScaleText}{CustomText} | {Count} body parts | Humanoid: {HumanoidText}`
+end
+
+function EvadeRig.Summary(Player: Player): string
+	if not EvadeRig.IsEnabled() then
+		return "Evade mode is off."
+	end
+	local Profile = EvadeRig.Profile(Player)
+	if not Profile then
+		return "Your rig is not in Workspace.Rigs yet."
+	end
+	return EvadeRig.Describe(Profile)
+end
+
+function EvadeRig.Capture(Model: Model): EvadeGuard
+	local Humanoid = Model:FindFirstChildOfClass("Humanoid")
+	local Properties: { [string]: any } = {}
+	local Children: { Instance } = {}
+	if Humanoid then
+		for _, Name in EvadeGuardedProperties do
+			local Success, Value = pcall(function()
+				return (Humanoid :: any)[Name]
+			end)
+			if Success then
+				Properties[Name] = Value
+			end
+		end
+		Children = Humanoid:GetChildren()
+	end
+	local Joints = Model:FindFirstChild("Joints")
+	return {
+		Humanoid = Humanoid,
+		Properties = Properties,
+		Children = Children,
+		Joints = Joints,
+		JointChildren = if Joints then Joints:GetChildren() else {},
+	}
+end
+
+function EvadeRig.Compare(Guard: EvadeGuard, Model: Model): string?
+	local Humanoid = Guard.Humanoid
+	if Humanoid then
+		if Humanoid.Parent ~= Model then
+			return "the Evade Humanoid was moved or replaced"
+		end
+		for Name, Expected in Guard.Properties do
+			local Success, Current = pcall(function()
+				return (Humanoid :: any)[Name]
+			end)
+			if Success and Current ~= Expected then
+				return `Humanoid.{Name} was changed`
+			end
+		end
+		for _, Child in Guard.Children do
+			if Child.Parent ~= Humanoid then
+				return `Humanoid child {Child.Name} was removed`
+			end
+		end
+	end
+	local Joints = Guard.Joints
+	if Joints then
+		if Joints.Parent ~= Model then
+			return "the Evade Joints folder was moved"
+		end
+		for _, Joint in Guard.JointChildren do
+			if Joint.Parent ~= Joints then
+				return `Evade joint {Joint.Name} was moved or removed`
+			end
+		end
+	end
+	return nil
+end
+
+function EvadeRig.HidesAccessories(): boolean
+	return EvadeRig.HideFirstPerson and LocalPlayer.CameraMaxZoomDistance <= EvadeSettings.FirstPersonZoom
+end
+
+function EvadeRig.GetDescription(Player: Player): HumanoidDescription?
+	local Cache = Workspace:FindFirstChild(EvadeSettings.CacheFolder)
+	local Entry = Cache and Cache:FindFirstChild(Player.Name)
+	if Entry and Entry:IsA("HumanoidDescription") then
+		return Entry
+	end
+	local Model = EvadeRig.FindModel(Player)
+	local Humanoid = Model and Model:FindFirstChildOfClass("Humanoid")
+	return if Humanoid then Humanoid:FindFirstChildOfClass("HumanoidDescription") else nil
+end
+
+function EvadeRig.GetRigType(Player: Player): Enum.HumanoidRigType?
+	local Model = EvadeRig.FindModel(Player)
+	local Humanoid = Model and Model:FindFirstChildOfClass("Humanoid")
+	if Humanoid then
+		return Humanoid.RigType
+	end
+	local Attribute = Player:GetAttribute("RigType")
+	if Attribute == "R15" then
+		return Enum.HumanoidRigType.R15
+	elseif Attribute == "R6" then
+		return Enum.HumanoidRigType.R6
+	end
+	return nil
+end
+
+function EvadeRig.PlayerFromInstance(Object: Instance): Player?
+	local Folder = EvadeRig.GetFolder()
+	if not Folder then
+		return nil
+	end
+	local Current: Instance? = Object
+	while Current and Current.Parent ~= Folder do
+		Current = Current.Parent
+	end
+	if not Current then
+		return nil
+	end
+	local Found = Players:FindFirstChild(Current.Name)
+	return if Found and Found:IsA("Player") then Found else nil
 end
 
 local Ledger = {}
@@ -3652,6 +3935,7 @@ end
 function InPlace:Commit(Data: AvatarData, Profile: RigProfile, Donor: Model): (boolean, string)
 	local Changes = Ledger.new()
 	local Before = InPlace.Capture(Profile.Model)
+	local Guard = if Profile.Evade then EvadeRig.Capture(Profile.Model) else nil
 	local Attached = 0
 
 	local Success, Err = xpcall(function()
@@ -3665,6 +3949,9 @@ function InPlace:Commit(Data: AvatarData, Profile: RigProfile, Donor: Model): (b
 	end, debug.traceback)
 
 	local Problem = if Success then InPlace.Compare(Before, Profile.Model) else nil
+	if Success and not Problem and Guard then
+		Problem = EvadeRig.Compare(Guard, Profile.Model)
+	end
 	if not Success or Problem then
 		Changes:Restore()
 		if not Success then
@@ -3675,6 +3962,10 @@ function InPlace:Commit(Data: AvatarData, Profile: RigProfile, Donor: Model): (b
 
 	self.Ledger = Changes
 	self.Profile = Profile
+	if Profile.Evade then
+		return true,
+			`Avatar applied to your Evade rig {Profile.Model:GetFullName()} ({Profile.Kind}, {EvadeRig.State(Profile)}), {Attached} accessories. Humanoid and joints untouched.`
+	end
 	return true, `Avatar applied to {Profile.Model:GetFullName()} ({Profile.Kind}, {Profile.Source}), {Attached} accessories.`
 end
 
@@ -3791,6 +4082,18 @@ function InPlace:FindDrift(): string?
 	return nil
 end
 
+function InPlace:IsIntact(): boolean
+	local Profile = self.Profile
+	if not self.Active or self.Busy or not Profile or not self.Ledger then
+		return false
+	end
+	local Model = Profile.Model
+	if Model.Parent == nil or not Model:IsDescendantOf(game) then
+		return false
+	end
+	return self:FindDrift() == nil
+end
+
 function InPlace:Check()
 	if not self.Active or self.Busy or not self.Profile then
 		return
@@ -3817,10 +4120,12 @@ function InPlace:SyncVisibility()
 	if not Ledger then
 		return
 	end
+	local Profile = self.Profile
+	local HideAll = Profile ~= nil and Profile.Evade == true and EvadeRig.HidesAccessories()
 	for _, Entry in Ledger.Mirrors do
 		local Part, Source = Entry.Part, Entry.Source
 		if Part.Parent and Source.Parent then
-			local Modifier = Source.LocalTransparencyModifier
+			local Modifier = if HideAll then 1 else Source.LocalTransparencyModifier
 			if Part.LocalTransparencyModifier ~= Modifier then
 				Part.LocalTransparencyModifier = Modifier
 			end
@@ -3835,7 +4140,9 @@ function InPlace:Watch()
 		"Poll",
 		RunService.Heartbeat:Connect(function(Delta)
 			self.Elapsed += Delta
-			if self.Elapsed >= 0.4 then
+			local Profile = self.Profile
+			local Interval = if Profile and Profile.Evade then 0.2 else 0.4
+			if self.Elapsed >= Interval then
 				self.Elapsed = 0
 				self:Check()
 			end
@@ -5457,7 +5764,7 @@ function TryOn:Wear(Data: AvatarData?)
 		return
 	end
 
-	if self.AppearanceMode then
+	if self.AppearanceMode or EvadeRig.IsEnabled() then
 		self:WearInPlace(Data, false)
 		return
 	end
@@ -5540,6 +5847,11 @@ function TryOn:Reapply(Character: Model)
 		return
 	end
 	if not self.Active or not self.Data then
+		return
+	end
+	local Profile = self.InPlace.Profile
+	if Profile and Profile.Evade and self.InPlace:IsIntact() then
+		self:Report("Your Evade rig still wears the avatar.")
 		return
 	end
 	self:Wear(self.Data)
@@ -5652,7 +5964,12 @@ function Picker:ClearHighlight()
 end
 
 function Picker:Highlighted(Target: Player?)
-	if not Target or Target == LocalPlayer or not Target.Character then
+	local Adornee: Instance? = nil
+	if Target and EvadeRig.IsEnabled() then
+		Adornee = EvadeRig.FindModel(Target)
+	end
+	Adornee = Adornee or (if Target then Target.Character else nil)
+	if not Target or Target == LocalPlayer or not Adornee then
 		self:ClearHighlight()
 		return
 	end
@@ -5663,7 +5980,7 @@ function Picker:Highlighted(Target: Player?)
 
 	local Highlight = Instance.new("Highlight")
 	Highlight.Name = "AvatarSelectionHighlight"
-	Highlight.Adornee = Target.Character
+	Highlight.Adornee = Adornee
 	Highlight.FillColor = Color3.fromRGB(205, 205, 210)
 	Highlight.FillTransparency = 0.72
 	Highlight.OutlineColor = Color3.fromRGB(190, 190, 190)
@@ -5682,11 +5999,28 @@ function Picker.FromScreenPosition(Position: Vector2): Player?
 	local Ray = Camera:ScreenPointToRay(Position.X, Position.Y)
 	local Params = RaycastParams.new()
 	Params.FilterType = Enum.RaycastFilterType.Exclude
-	Params.FilterDescendantsInstances = { LocalPlayer.Character }
+	local Evade = EvadeRig.IsEnabled()
+	local Ignore: { Instance } = {}
+	if LocalPlayer.Character then
+		table.insert(Ignore, LocalPlayer.Character)
+	end
+	if Evade then
+		local Own = EvadeRig.FindModel(LocalPlayer)
+		if Own then
+			table.insert(Ignore, Own)
+		end
+	end
+	Params.FilterDescendantsInstances = Ignore
 	local Result = Workspace:Raycast(Ray.Origin, Ray.Direction * 1000, Params)
 	local Target = Result and Result.Instance
 	if not Target then
 		return nil
+	end
+	if Evade then
+		local Found = EvadeRig.PlayerFromInstance(Target)
+		if Found then
+			return if Found ~= LocalPlayer then Found else nil
+		end
 	end
 	local Model = Target:FindFirstAncestorOfClass("Model")
 	if not Model or not Model:FindFirstChildOfClass("Humanoid") then
@@ -5762,6 +6096,8 @@ local DefaultOptions: Options = table.freeze({
 	PreviewAutoRotate = false,
 	PreviewCacheLimit = 24,
 	ToggleKey = "None",
+	EvadeMode = "Auto",
+	EvadeHideFirstPerson = true,
 })
 
 local SortModes = table.freeze({ "Saved order", "Name (A-Z)", "Name (Z-A)", "Most accessories", "Rig type" })
@@ -5770,7 +6106,7 @@ local RigFilters = table.freeze({ "All", "R6", "R15" })
 local FlagPrefix = "AvatarChanger"
 
 local AvatarChanger = {}
-AvatarChanger.Version = "2.4.0"
+AvatarChanger.Version = "2.5.0"
 AvatarChanger.Library = nil
 AvatarChanger.Folder = Constants.DefaultFolder
 AvatarChanger.Options = table.clone(DefaultOptions) :: Options
@@ -5923,11 +6259,13 @@ end
 
 function AvatarChanger:_ApplyOptions()
 	local Options = self.Options
+	EvadeRig.SetMode(Options.EvadeMode)
+	EvadeRig.HideFirstPerson = Options.EvadeHideFirstPerson
 	if self.TryOn then
 		self.TryOn.ReapplyOnRespawn = Options.ReapplyOnRespawn
 		self.TryOn.PlaceholderMode = Options.PlaceholderMode
 		self.TryOn.AppearanceMode = Options.AppearanceMode
-		self.TryOn.Similar.Enabled = Options.ApplyToSimilar
+		self.TryOn.Similar.Enabled = Options.ApplyToSimilar or EvadeRig.IsEnabled()
 		self.TryOn.Similar.Threshold = math.clamp(Options.SimilarThreshold, 0.5, 1)
 		self.TryOn.RigPath = Options.RigPath
 	end
@@ -5952,6 +6290,8 @@ function AvatarChanger:_ApplyOptions()
 		Notifications = Options.Notifications,
 		AutoRotate = Options.PreviewAutoRotate,
 		PreviewHeight = Options.PreviewHeight,
+		EvadeMode = Options.EvadeMode,
+		EvadeHideFirstPerson = Options.EvadeHideFirstPerson,
 	}
 	for Name, Value in Bindings do
 		local Widget = Widgets[Name]
@@ -6329,6 +6669,9 @@ function AvatarChanger:_RefreshWear()
 		return
 	end
 	CallMethod(self.Widgets.Wear, "SetButtonText", if self.TryOn:IsBusy() then "Working..." else "Wear")
+	if self.Widgets.EvadeInfo and EvadeRig.IsEnabled() then
+		CallMethod(self.Widgets.EvadeInfo, "SetDesc", EvadeRig.Summary(LocalPlayer))
+	end
 	self:_UpdateRows()
 end
 
@@ -6612,7 +6955,34 @@ function AvatarChanger:_ShowPreview(Data: AvatarData?)
 	end)
 end
 
+function AvatarChanger:_CaptureEvade(Player: Player): (AvatarData?, string?)
+	local Description = EvadeRig.GetDescription(Player)
+	if not Description then
+		return nil, "Evade has no stored appearance for that player yet."
+	end
+	local Properties = Serializer.Capture(Description, nil)
+	if type(Properties) ~= "table" then
+		return nil, "Could not serialize the Evade appearance."
+	end
+	local RigType = EvadeRig.GetRigType(Player) or Enum.HumanoidRigType.R15
+	return {
+		Name = Player.Name,
+		UserId = Player.UserId,
+		DisplayName = Player.DisplayName,
+		Properties = Properties,
+		RigType = Util.RigName(RigType),
+		Signature = Serializer.Signature(Properties, RigType),
+		Order = 1,
+	}
+end
+
 function AvatarChanger:_Capture(Player: Player): (AvatarData?, string?)
+	if Player and EvadeRig.IsEnabled() then
+		local Data = self:_CaptureEvade(Player)
+		if Data then
+			return Data, nil
+		end
+	end
 	if not Player or not Player.Character then
 		return nil, "Player character is unavailable."
 	end
@@ -6660,6 +7030,9 @@ function AvatarChanger:_CaptureUsername(Username: string): (AvatarData?, string?
 	local Character = LocalPlayer.Character
 	local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
 	local RigType = if Humanoid then Humanoid.RigType else Enum.HumanoidRigType.R6
+	if EvadeRig.IsEnabled() then
+		RigType = EvadeRig.GetRigType(LocalPlayer) or RigType
+	end
 
 	local DisplayName = Username
 	pcall(function()
@@ -7489,13 +7862,72 @@ function AvatarChanger:_BuildSimilar(Tab: any)
 	return Section
 end
 
+function AvatarChanger:_BuildEvade(Tab: any)
+	local Widgets = self.Widgets
+	local Options = self.Options
+	local Section = Tab:AddSection("Evade")
+	Widgets.EvadeSection = Section
+
+	Widgets.EvadeInfo = AddElement(Section, "AddParagraph", {
+		Title = "Rig",
+		Content = EvadeRig.Summary(LocalPlayer),
+	})
+
+	local Strip = AddStrip(Section)
+	Widgets.EvadeHideFirstPerson = AddElement(Strip, "AddToggle", `{FlagPrefix}EvadeHideFirstPerson`, {
+		Title = "Hide accessories in first person",
+		Default = Options.EvadeHideFirstPerson,
+		Callback = function(Value)
+			self.Options.EvadeHideFirstPerson = Value == true
+			EvadeRig.HideFirstPerson = Value == true
+		end,
+	})
+	AddElement(Strip, "AddButton", {
+		Title = "Rig status",
+		ButtonText = "Refresh",
+		Variant = "Tonal",
+		Callback = function()
+			self:InspectEvade()
+		end,
+	})
+	return Section
+end
+
+function AvatarChanger:IsEvade(): boolean
+	return EvadeRig.IsEnabled()
+end
+
+function AvatarChanger:GetEvadeRig(): Model?
+	local Model = EvadeRig.FindModel(LocalPlayer)
+	return Model
+end
+
+function AvatarChanger:SetEvadeMode(Mode: string)
+	assert(table.find(EvadeRig.Modes, Mode), "AvatarChanger:SetEvadeMode - expected Auto or Off")
+	self.Options.EvadeMode = Mode
+	self:_ApplyOptions()
+	if self.Booted then
+		self:_RewearIfWorn(true)
+	end
+end
+
+function AvatarChanger:InspectEvade(): string
+	local Summary = EvadeRig.Summary(LocalPlayer)
+	CallMethod(self.Widgets.EvadeInfo, "SetDesc", Summary)
+	self:_SetStatus(Summary)
+	return Summary
+end
+
 function AvatarChanger:_RefreshOptions()
 	local Widgets, Options = self.Widgets, self.Options
-	local Direct = Options.AppearanceMode
-	CallMethod(Widgets.RigPath, "SetVisible", Direct)
+	local Evade = EvadeRig.IsEnabled()
+	local Direct = Options.AppearanceMode or Evade
+	CallMethod(Widgets.AppearanceMode, "SetVisible", not Evade)
+	CallMethod(Widgets.RigPath, "SetVisible", Direct and not Evade)
 	CallMethod(Widgets.Placeholder, "SetVisible", not Direct)
-	CallMethod(Widgets.SimilarSection, "SetVisible", Direct)
-	CallMethod(Widgets.SimilarPanel, "SetVisible", Direct and Options.ApplyToSimilar)
+	CallMethod(Widgets.EvadeSection, "SetVisible", EvadeRig.Detect())
+	CallMethod(Widgets.SimilarSection, "SetVisible", Direct and not Evade)
+	CallMethod(Widgets.SimilarPanel, "SetVisible", Direct and not Evade and Options.ApplyToSimilar)
 end
 
 function AvatarChanger:BuildSection(Tab: any)
@@ -7509,6 +7941,7 @@ function AvatarChanger:BuildSection(Tab: any)
 		List = self:_BuildList(Tab),
 		Save = self:_BuildSave(Tab),
 		Options = self:_BuildOptions(Tab),
+		Evade = self:_BuildEvade(Tab),
 		Similar = self:_BuildSimilar(Tab),
 	}
 
