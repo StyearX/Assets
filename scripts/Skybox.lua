@@ -489,6 +489,66 @@ Skybox.Skyboxes = {
             { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Yor-Forger/Yor-Forger-Down.png", File = "Yor-Forger-Down.png", Size = 10829 },
         },
     },
+    ["Black Hole Dusk"] = {
+        Folder = "BlackHoleDusk",
+        ResetHaze = true,
+        Faces = {
+            { Prop = "SkyboxBk", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Bk.png", File = "1_Bk.png", Size = 787314 },
+            { Prop = "SkyboxFt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Ft.png", File = "1_Ft.png", Size = 567943 },
+            { Prop = "SkyboxLf", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Lf.png", File = "1_Lf.png", Size = 1404129 },
+            { Prop = "SkyboxRt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Rt.png", File = "1_Rt.png", Size = 391273 },
+            { Prop = "SkyboxUp", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Up.png", File = "1_Up.png", Size = 2100171 },
+            { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/1_Dn.png", File = "1_Dn.png", Size = 126502 },
+        },
+    },
+    ["Spiral Rings"] = {
+        Folder = "SpiralRings",
+        ResetHaze = true,
+        Faces = {
+            { Prop = "SkyboxBk", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Bk.png", File = "2_Bk.png", Size = 2669134 },
+            { Prop = "SkyboxFt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Ft.png", File = "2_Ft.png", Size = 3685972 },
+            { Prop = "SkyboxLf", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Lf.png", File = "2_Lf.png", Size = 4159862 },
+            { Prop = "SkyboxRt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Rt.png", File = "2_Rt.png", Size = 2444616 },
+            { Prop = "SkyboxUp", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Up.png", File = "2_Up.png", Size = 5322687 },
+            { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/2_Dn.png", File = "2_Dn.png", Size = 2472512 },
+        },
+    },
+    ["Gargantua"] = {
+        Folder = "Gargantua",
+        ResetHaze = true,
+        Faces = {
+            { Prop = "SkyboxBk", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Bk.png", File = "3_Bk.png", Size = 2275991 },
+            { Prop = "SkyboxFt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Ft.png", File = "3_Ft.png", Size = 3021778 },
+            { Prop = "SkyboxLf", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Lf.png", File = "3_Lf.png", Size = 2719297 },
+            { Prop = "SkyboxRt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Rt.png", File = "3_Rt.png", Size = 2577975 },
+            { Prop = "SkyboxUp", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Up.png", File = "3_Up.png", Size = 2507299 },
+            { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/3_Dn.png", File = "3_Dn.png", Size = 3483195 },
+        },
+    },
+    ["Blue Ring Planet"] = {
+        Folder = "BlueRingPlanet",
+        ResetHaze = true,
+        Faces = {
+            { Prop = "SkyboxBk", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Bk.png", File = "4_Bk.png", Size = 2379150 },
+            { Prop = "SkyboxFt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Ft.png", File = "4_Ft.png", Size = 2767302 },
+            { Prop = "SkyboxLf", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Lf.png", File = "4_Lf.png", Size = 2490039 },
+            { Prop = "SkyboxRt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Rt.png", File = "4_Rt.png", Size = 2658483 },
+            { Prop = "SkyboxUp", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Up.png", File = "4_Up.png", Size = 2396171 },
+            { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/4_Dn.png", File = "4_Dn.png", Size = 2611216 },
+        },
+    },
+    ["Gas Giant Rings"] = {
+        Folder = "GasGiantRings",
+        ResetHaze = true,
+        Faces = {
+            { Prop = "SkyboxBk", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Bk.png", File = "5_Bk.png", Size = 1207267 },
+            { Prop = "SkyboxFt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Ft.png", File = "5_Ft.png", Size = 1594832 },
+            { Prop = "SkyboxLf", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Lf.png", File = "5_Lf.png", Size = 1895000 },
+            { Prop = "SkyboxRt", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Rt.png", File = "5_Rt.png", Size = 1825321 },
+            { Prop = "SkyboxUp", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Up.png", File = "5_Up.png", Size = 1082735 },
+            { Prop = "SkyboxDn", Url = "https://raw.githubusercontent.com/StyearX/Custom-skybox/main/Directoryless/5_Dn.png", File = "5_Dn.png", Size = 2110828 },
+        },
+    },
     ["Iteration 3.2.0"] = {
         ResetHaze = true,
         RbxAssetIds = {
@@ -1137,11 +1197,7 @@ function Skybox:ClearSky()
     end
 end
 
-function Skybox:Apply(Data)
-    if not self:IsAllowed(Data) then
-        error("Age verification required")
-    end
-
+function Skybox:ResetSky()
     self:ClearSky()
 
     local NativeSky = Instance.new("Sky")
@@ -1157,32 +1213,59 @@ function Skybox:Apply(Data)
     for _, Child in pairs(Lighting:GetChildren()) do
         if Child:IsA("Atmosphere") then Child.Haze = 0 end
     end
+end
 
+function Skybox:CreateSky(Data, Assets)
     local SkyInstance = Instance.new("Sky")
     SkyInstance.Name = "Sky"
     SkyInstance.CelestialBodiesShown = false
     SkyInstance.StarCount = Data.StarCount or 0
+
     if Data.SunAngularSize then SkyInstance.SunAngularSize = Data.SunAngularSize end
     if Data.MoonAngularSize then SkyInstance.MoonAngularSize = Data.MoonAngularSize end
 
-    if Data.RbxAssetIds then
-        for Prop, Id in pairs(Data.RbxAssetIds) do
-            SkyInstance[Prop] = Id
-        end
-    elseif Data.Faces then
-        local Folder = self.Folder .. "/" .. Data.Folder
-        self:BuildFolderTree()
-        pcall(makefolder, Folder)
-        for _, Face in ipairs(Data.Faces) do
-            local Path = self:FacePath(Data, Face)
-            if not isfile(Path) and not self:Download(Face.Url, Path) then
-                error("Failed to download " .. Face.File)
-            end
-            SkyInstance[Face.Prop] = getcustomasset(Path)
-        end
+    for Prop, Asset in pairs(Assets) do
+        SkyInstance[Prop] = Asset
     end
 
     SkyInstance.Parent = Lighting
+    return SkyInstance
+end
+
+function Skybox:ResolveAssets(Data)
+    local Assets = {}
+
+    if Data.RbxAssetIds then
+        for Prop, Id in pairs(Data.RbxAssetIds) do
+            Assets[Prop] = Id
+        end
+    elseif Data.Faces then
+        self:BuildFolderTree()
+        pcall(makefolder, self.Folder .. "/" .. Data.Folder)
+
+        for _, Face in ipairs(Data.Faces) do
+            local Path = self:FacePath(Data, Face)
+
+            if not isfile(Path) and not self:Download(Face.Url, Path) then
+                error("Failed to download " .. Face.File)
+            end
+
+            Assets[Face.Prop] = getcustomasset(Path)
+        end
+    end
+
+    return Assets
+end
+
+function Skybox:Apply(Data)
+    if not self:IsAllowed(Data) then
+        error("Age verification required")
+    end
+
+    local Assets = self:ResolveAssets(Data)
+
+    self:ResetSky()
+    self:CreateSky(Data, Assets)
 end
 
 function Skybox:ApplySelected()
@@ -1236,30 +1319,25 @@ end
 
 function Skybox:ApplyCustom()
     local PropMap = { Lf = "SkyboxLf", Rt = "SkyboxRt", Up = "SkyboxUp", Dn = "SkyboxDn", Ft = "SkyboxFt", Bk = "SkyboxBk" }
+    local Assets = {}
+    local Count = 0
 
-    self:ClearSky()
-
-    local SkyInstance = Instance.new("Sky")
-    SkyInstance.Name = "Sky"
-    SkyInstance.CelestialBodiesShown = false
-    SkyInstance.StarCount = 0
-
-    local AppliedAny = false
     for Face, Prop in pairs(PropMap) do
         local Resolved = self:ResolveInput(self.CustomInputs[Face], Face)
+
         if Resolved then
-            SkyInstance[Prop] = Resolved
-            AppliedAny = true
+            Assets[Prop] = Resolved
+            Count = Count + 1
         end
     end
 
-    if AppliedAny then
-        SkyInstance.Parent = Lighting
-        self:Notify("Custom skybox applied.")
-    else
-        SkyInstance:Destroy()
-        self:Notify("No valid inputs provided.")
+    if Count == 0 then
+        return self:Notify("No valid inputs provided.")
     end
+
+    self:ResetSky()
+    self:CreateSky({}, Assets)
+    self:Notify("Custom skybox applied.")
 end
 
 function Skybox:RefreshNames()
