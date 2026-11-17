@@ -1,28 +1,132 @@
-local CloneRef = cloneref or function(Service)
-	return Service
-end
+--!nonstrict
+--!optimize 2
 
-local Players = CloneRef(game:GetService("Players"))
-local RunService = CloneRef(game:GetService("RunService"))
-local UserInputService = CloneRef(game:GetService("UserInputService"))
-local HttpService = CloneRef(game:GetService("HttpService"))
-local MarketplaceService = CloneRef(game:GetService("MarketplaceService"))
-local GuiService = CloneRef(game:GetService("GuiService"))
-local Workspace = CloneRef(game:GetService("Workspace"))
+local Players: Players = game:GetService("Players")
+local RunService: RunService = game:GetService("RunService")
+local UserInputService: UserInputService = game:GetService("UserInputService")
+local HttpService: HttpService = game:GetService("HttpService")
+local MarketplaceService: MarketplaceService = game:GetService("MarketplaceService")
+local GuiService: GuiService = game:GetService("GuiService")
+local Workspace: Workspace = game:GetService("Workspace")
 
 if not game:IsLoaded() then
 	game.Loaded:Wait()
 end
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+local LocalPlayer: Player = Players.LocalPlayer
+local PlayerGui: PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
-local Constants = {
-	Version = "2.0.0",
-	RenderStepName = "HUDManagerEnforce",
+--// Types \\
+
+export type Axis = "Free" | "Horizontal" | "Vertical"
+export type SelectionMode = "Smart" | "Exact"
+export type LoadMode = "Replace" | "Merge"
+export type Variant = "Menu" | "MenuDanger" | "Subtle" | "Tonal" | "Primary" | "Active" | "Danger" | "Ghost"
+
+export type Rule = {
+	Name: string,
+	IsDeleted: boolean,
+	Position: UDim2,
+	Size: UDim2,
+	SizeModified: boolean,
+}
+
+export type Original = {
+	Position: UDim2,
+	Size: UDim2,
+}
+
+export type Change = {
+	Key: string,
+	Before: Rule?,
+	After: Rule?,
+}
+
+export type Entry = {
+	Label: string,
+	Changes: { Change },
+	Time: number,
+}
+
+export type Counts = {
+	Total: number,
+	Hidden: number,
+	Moved: number,
+	Resized: number,
+}
+
+export type Settings = {
+	ResizeStep: number,
+	NudgeStep: number,
+	SnapSize: number,
+	Axis: Axis,
+	SelectionMode: SelectionMode,
+	GroupCluster: boolean,
+	ShowLauncher: boolean,
+	RespectLocks: boolean,
+	Shortcuts: boolean,
+	LoadMode: LoadMode,
+}
+
+export type Press = {
+	Origin: Vector2,
+	Moved: boolean,
+	Objects: { [GuiObject]: boolean },
+}
+
+export type Drag = {
+	Input: InputObject,
+	Origin: Vector3,
+	Moved: boolean,
+	Set: { [GuiObject]: boolean },
+	Start: { [GuiObject]: UDim2 },
+	Keys: { [GuiObject]: string },
+	Before: { [string]: Rule? },
+}
+
+export type Session = {
+	EditMode: boolean,
+	Selected: GuiObject?,
+	Cluster: { GuiObject },
+	BarLocked: boolean,
+	Drag: Drag?,
+}
+
+export type PackedRule = {
+	Name: string,
+	IsDeleted: boolean,
+	Position: { number },
+	Size: { number },
+	SizeModified: boolean,
+}
+
+export type Profile = {
+	Version: number,
+	GameId: string,
+	GameName: string,
+	SavedAt: number,
+	Rules: { [string]: PackedRule },
+}
+
+export type Connection = {
+	Connected: boolean,
+	Disconnect: (self: Connection) -> (),
+}
+
+export type Signal<T...> = {
+	Connect: (self: Signal<T...>, Handler: (T...) -> ()) -> Connection,
+	Fire: (self: Signal<T...>, T...) -> (),
+}
+
+--// Constants \\
+
+local Constants = table.freeze({
+	Version = "3.0.0",
+	Id = "HUDManager",
+	RenderStep = "HUDManagerEnforce",
 	RenderPriority = 2000,
-	OverlayLayer = "HUDManager",
-	ShieldLayer = "HUDManagerShield",
+	OverlayLayer = "Overlay",
+	ShieldLayer = "Shield",
 	OverlayOrder = 99999,
 	ShieldOrder = 998,
 	HistoryLimit = 100,
@@ -40,31 +144,26 @@ local Constants = {
 	RepeatDelay = 0.4,
 	RepeatInterval = 0.06,
 	ViewportMargin = 6,
-	DockCollapsed = 44,
-	DockExpanded = 156,
-	DockHold = 2.5,
-	DockLeave = 0.35,
-	DockSpeed = 18,
+	PanelBase = 0.08,
 	LockAttribute = "Locked",
 	FormatVersion = 2,
 	LegacyFolder = "PerfectUIManager_Configs",
 	NudgeSteps = { 1, 5, 10, 25 },
+	Dock = { Collapsed = 44, Expanded = 156, Hold = 2.5, Leave = 0.35, Speed = 18 },
 	Icons = {
 		Edit = "lucide:pencil",
 		Undo = "lucide:undo-2",
 		Redo = "lucide:redo-2",
 		Save = "lucide:save",
-		Panel = "lucide:layout-dashboard",
 		Advanced = "lucide:sliders-horizontal",
 		Close = "lucide:x",
 		Settings = "lucide:settings",
-		Power = "lucide:power",
 		Lock = "lucide:lock",
 		Unlock = "lucide:unlock",
 		Plus = "lucide:plus",
 		Minus = "lucide:minus",
 		Reset = "lucide:rotate-ccw",
-		Delete = "lucide:eye-off",
+		Hide = "lucide:eye-off",
 		Up = "lucide:arrow-up",
 		Down = "lucide:arrow-down",
 		Left = "lucide:arrow-left",
@@ -72,40 +171,20 @@ local Constants = {
 		Launcher = "lucide:layout-dashboard",
 		Focus = "lucide:crosshair",
 		Grip = "lucide:grip-horizontal",
+		Search = "lucide:search",
+		CenterX = "lucide:align-center-horizontal",
+		CenterY = "lucide:align-center-vertical",
 	},
-	Glyphs = {
-		Edit = "E",
-		Undo = "<",
-		Redo = ">",
-		Save = "S",
-		Panel = "P",
-		Advanced = "A",
-		Close = "x",
-		Settings = "S",
-		Power = "X",
-		Lock = "L",
-		Unlock = "U",
-		Plus = "+",
-		Minus = "-",
-		Reset = "R",
-		Delete = "H",
-		Up = "^",
-		Down = "v",
-		Left = "<",
-		Right = ">",
-		Launcher = "H",
-		Focus = "O",
-		Grip = "...",
-	},
-}
+})
 
-local Signal = {}
-Signal.__index = Signal
+local MonoFace: Font = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Medium, Enum.FontStyle.Normal)
 
-local Connection = {}
-Connection.__index = Connection
+--// Signal \\
 
-function Connection:Disconnect()
+local Link = {}
+Link.__index = Link
+
+function Link.Disconnect(self: any)
 	if not self.Connected then
 		return
 	end
@@ -118,44 +197,66 @@ function Connection:Disconnect()
 	end
 end
 
-function Signal.new()
-	return setmetatable({ Handlers = {} }, Signal)
+local Signal = {}
+Signal.__index = Signal
+
+function Signal.new<T...>(): Signal<T...>
+	return setmetatable({ Handlers = {} }, Signal) :: any
 end
 
-function Signal:Connect(Handler)
-	local Link = setmetatable({ Handler = Handler, Owner = self, Connected = true }, Connection)
-	table.insert(self.Handlers, Link)
-	return Link
+function Signal.Connect(self: any, Handler: (...any) -> ()): Connection
+	local Connected = setmetatable({ Handler = Handler, Owner = self, Connected = true }, Link)
+	table.insert(self.Handlers, Connected)
+	return Connected :: any
 end
 
-function Signal:Fire(...)
-	for _, Link in table.clone(self.Handlers) do
-		if Link.Connected then
-			task.spawn(Link.Handler, ...)
+function Signal.Fire(self: any, ...: any)
+	for _, Connected in table.clone(self.Handlers) do
+		if Connected.Connected then
+			task.spawn(Connected.Handler, ...)
 		end
 	end
 end
 
+--// Util \\
+
 local Util = {}
 
-function Util.IsPointer(Input)
+function Util.IsPointer(Input: InputObject): boolean
 	local InputType = Input.UserInputType
 	return InputType == Enum.UserInputType.MouseButton1 or InputType == Enum.UserInputType.Touch
 end
 
-function Util.IsBlank(Value)
+function Util.IsSameInput(Held: InputObject, Other: InputObject): boolean
+	return Held == Other
+		or (Held.UserInputType == Enum.UserInputType.MouseButton1 and Other.UserInputType == Enum.UserInputType.MouseButton1)
+end
+
+function Util.IsTracking(Held: InputObject, Moved: InputObject): boolean
+	if Held.UserInputType == Enum.UserInputType.Touch then
+		return Held == Moved
+	end
+
+	return Moved.UserInputType == Enum.UserInputType.MouseMovement
+end
+
+function Util.IsBlank(Value: any): boolean
 	return type(Value) ~= "string" or string.match(Value, "^%s*$") ~= nil
 end
 
-function Util.Trim(Value)
+function Util.Trim(Value: any): string
 	return (string.gsub(tostring(Value or ""), "^%s*(.-)%s*$", "%1"))
 end
 
-function Util.SanitizeName(Value)
+function Util.SanitizeName(Value: any): string
 	return (string.gsub(Util.Trim(Value), '[\\/:*?"<>|]', ""))
 end
 
-function Util.HasFileSystem()
+function Util.Quote(Value: string): string
+	return string.format("%q", Value)
+end
+
+function Util.HasFileSystem(): boolean
 	return type(writefile) == "function"
 		and type(readfile) == "function"
 		and type(isfile) == "function"
@@ -164,21 +265,21 @@ function Util.HasFileSystem()
 		and type(listfiles) == "function"
 end
 
-function Util.EnsureFolder(Path)
+function Util.EnsureFolder(Path: string)
 	if type(isfolder) ~= "function" or type(makefolder) ~= "function" then
 		return
 	end
 
 	local Built = ""
 	for Part in string.gmatch(Path, "[^/\\]+") do
-		Built = if Built == "" then Part else Built .. "/" .. Part
+		Built = if Built == "" then Part else `{Built}/{Part}`
 		if not isfolder(Built) then
 			pcall(makefolder, Built)
 		end
 	end
 end
 
-function Util.ReadJson(Path)
+function Util.ReadJson(Path: string): { [any]: any }?
 	if type(isfile) ~= "function" or not isfile(Path) then
 		return nil
 	end
@@ -187,14 +288,10 @@ function Util.ReadJson(Path)
 		return HttpService:JSONDecode(readfile(Path))
 	end)
 
-	if Success and type(Data) == "table" then
-		return Data
-	end
-
-	return nil
+	return if Success and type(Data) == "table" then Data else nil
 end
 
-function Util.WriteJson(Path, Data)
+function Util.WriteJson(Path: string, Data: any): (boolean, string?)
 	local Encoded, Text = pcall(HttpService.JSONEncode, HttpService, Data)
 	if not Encoded then
 		return false, "encode failed"
@@ -204,14 +301,14 @@ function Util.WriteJson(Path, Data)
 		return false, "write failed"
 	end
 
-	return true
+	return true, nil
 end
 
-function Util.UDim2ToArray(Value)
+function Util.PackUDim2(Value: UDim2): { number }
 	return { Value.X.Scale, Value.X.Offset, Value.Y.Scale, Value.Y.Offset }
 end
 
-function Util.ArrayToUDim2(Array)
+function Util.UnpackUDim2(Array: any): UDim2?
 	if type(Array) ~= "table" then
 		return nil
 	end
@@ -225,44 +322,16 @@ function Util.ArrayToUDim2(Array)
 	return UDim2.new(Array[1], Array[2], Array[3], Array[4])
 end
 
-function Util.GetViewport()
+function Util.Shift(Value: UDim2, X: number, Y: number): UDim2
+	return UDim2.new(Value.X.Scale, Value.X.Offset + X, Value.Y.Scale, Value.Y.Offset + Y)
+end
+
+function Util.GetViewport(): Vector2
 	local Camera = Workspace.CurrentCamera
 	return if Camera then Camera.ViewportSize else Vector2.new(1920, 1080)
 end
 
-function Util.WatchViewport(Callback)
-	local CameraLink = nil
-
-	local function Bind()
-		if CameraLink then
-			CameraLink:Disconnect()
-			CameraLink = nil
-		end
-
-		local Camera = Workspace.CurrentCamera
-		if Camera then
-			CameraLink = Camera:GetPropertyChangedSignal("ViewportSize"):Connect(Callback)
-		end
-	end
-
-	local SwapLink = Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-		Bind()
-		Callback()
-	end)
-
-	Bind()
-
-	return function()
-		SwapLink:Disconnect()
-
-		if CameraLink then
-			CameraLink:Disconnect()
-			CameraLink = nil
-		end
-	end
-end
-
-function Util.PointInGui(Point, Gui)
+function Util.PointInGui(Point: Vector2, Gui: GuiObject): boolean
 	local Position = Gui.AbsolutePosition
 	local Size = Gui.AbsoluteSize
 	return Point.X >= Position.X
@@ -271,7 +340,7 @@ function Util.PointInGui(Point, Gui)
 		and Point.Y <= Position.Y + Size.Y
 end
 
-function Util.Snap(Value, Step)
+function Util.Snap(Value: number, Step: number): number
 	if Step <= 0 then
 		return Value
 	end
@@ -279,18 +348,20 @@ function Util.Snap(Value, Step)
 	return math.round(Value / Step) * Step
 end
 
-function Util.SortedKeys(Table)
+function Util.SortedKeys(Source: { [string]: any }): { string }
 	local Keys = {}
-	for Key in Table do
+	for Key in Source do
 		table.insert(Keys, Key)
 	end
 	table.sort(Keys)
 	return Keys
 end
 
+--// KeyResolver \\
+
 local KeyResolver = {}
 
-function KeyResolver.Resolve(Object)
+function KeyResolver.Resolve(Object: GuiObject): string
 	local Base = Object.Name
 	local Trait = ""
 
@@ -306,14 +377,12 @@ function KeyResolver.Resolve(Object)
 		end
 	elseif Object:IsA("TextLabel") or Object:IsA("TextButton") or Object:IsA("TextBox") then
 		if Object.Text ~= "" then
-			Trait = Trait .. "_" .. string.sub(Object.Text, 1, 10)
+			Trait ..= "_" .. string.sub(Object.Text, 1, 10)
 		end
 	elseif Object:IsA("ImageLabel") or Object:IsA("ImageButton") then
-		if Object.Image ~= "" then
-			local Id = string.match(Object.Image, "%d+")
-			if Id then
-				Trait = Trait .. "_IMG" .. Id
-			end
+		local Id = if Object.Image ~= "" then string.match(Object.Image, "%d+") else nil
+		if Id then
+			Trait ..= "_IMG" .. Id
 		end
 	end
 
@@ -332,28 +401,30 @@ function KeyResolver.Resolve(Object)
 		end
 
 		if Order > 1 then
-			Trait = Trait .. "_IDX" .. Order
+			Trait ..= "_IDX" .. Order
 		end
 	end
 
 	return Base .. Trait
 end
 
+--// Geometry \\
+
 local Geometry = {}
 
-function Geometry.FindLayout(Parent)
+function Geometry.FindLayout(Parent: Instance?): Instance?
 	if not Parent then
 		return nil
 	end
 
-	local Found = nil
-	pcall(function()
-		Found = Parent:FindFirstChildWhichIsA("UILayout") or Parent:FindFirstChildWhichIsA("UIGridStyleLayout")
+	local Success, Found = pcall(function()
+		return Parent:FindFirstChildWhichIsA("UILayout") or Parent:FindFirstChildWhichIsA("UIGridStyleLayout")
 	end)
-	return Found
+
+	return if Success then Found else nil
 end
 
-function Geometry.VisualPosition(Gui)
+function Geometry.VisualPosition(Gui: GuiObject): UDim2
 	local Parent = Gui.Parent
 	if not (Parent and Parent:IsA("GuiObject")) then
 		return Gui.Position
@@ -361,7 +432,7 @@ function Geometry.VisualPosition(Gui)
 
 	local Origin = Parent.AbsolutePosition
 	if Parent:IsA("ScrollingFrame") then
-		Origin = Origin - Parent.CanvasPosition
+		Origin -= Parent.CanvasPosition
 	end
 
 	local Anchor = Gui.AnchorPoint
@@ -371,7 +442,7 @@ function Geometry.VisualPosition(Gui)
 	return UDim2.fromOffset(Position.X - Origin.X + Anchor.X * Size.X, Position.Y - Origin.Y + Anchor.Y * Size.Y)
 end
 
-function Geometry.VisualSize(Gui)
+function Geometry.VisualSize(Gui: GuiObject): UDim2
 	if Gui.Size == UDim2.new() then
 		return UDim2.fromOffset(Gui.AbsoluteSize.X, Gui.AbsoluteSize.Y)
 	end
@@ -379,24 +450,20 @@ function Geometry.VisualSize(Gui)
 	return Gui.Size
 end
 
-function Geometry.OriginalPosition(Gui)
-	if Geometry.FindLayout(Gui.Parent) then
-		return Geometry.VisualPosition(Gui)
-	end
-
-	return Gui.Position
+function Geometry.OriginalPosition(Gui: GuiObject): UDim2
+	return if Geometry.FindLayout(Gui.Parent) then Geometry.VisualPosition(Gui) else Gui.Position
 end
 
-function Geometry.Center(Gui)
+function Geometry.Center(Gui: GuiObject): Vector2
 	return Gui.AbsolutePosition + Gui.AbsoluteSize / 2
 end
 
-function Geometry.Inset()
+function Geometry.Inset(): Vector2
 	local TopLeft = GuiService:GetGuiInset()
 	return TopLeft
 end
 
-function Geometry.ScreenPosition(Gui)
+function Geometry.ScreenPosition(Gui: GuiObject): Vector2
 	local Root = Gui:FindFirstAncestorOfClass("ScreenGui")
 
 	if Root and not Root.IgnoreGuiInset then
@@ -406,7 +473,7 @@ function Geometry.ScreenPosition(Gui)
 	return Gui.AbsolutePosition
 end
 
-function Geometry.ContainsInput(Gui, Position)
+function Geometry.ContainsInput(Gui: GuiObject, Position: Vector3): boolean
 	local Point = Vector2.new(Position.X, Position.Y) + Geometry.Inset()
 	local Origin = Geometry.ScreenPosition(Gui)
 	local Size = Gui.AbsoluteSize
@@ -417,10 +484,24 @@ function Geometry.ContainsInput(Gui, Position)
 		and Point.Y <= Origin.Y + Size.Y
 end
 
+--// RuleBook \\
+
 local RuleBook = {}
 RuleBook.__index = RuleBook
 
-function RuleBook.new()
+type BookFields = {
+	Rules: { [string]: Rule },
+	Originals: { [string]: Original },
+	Tracked: { [GuiObject]: string },
+	Hidden: { [GuiObject]: boolean },
+	Baked: { [Instance]: boolean },
+	External: { [GuiObject]: boolean },
+	Changed: Signal<>,
+}
+
+export type RuleBook = typeof(setmetatable({} :: BookFields, RuleBook))
+
+function RuleBook.new(): RuleBook
 	return setmetatable({
 		Rules = {},
 		Originals = {},
@@ -429,15 +510,15 @@ function RuleBook.new()
 		Baked = setmetatable({}, { __mode = "k" }),
 		External = setmetatable({}, { __mode = "k" }),
 		Changed = Signal.new(),
-	}, RuleBook)
+	} :: BookFields, RuleBook)
 end
 
-function RuleBook:Snapshot(Key)
+function RuleBook.Snapshot(self: RuleBook, Key: string): Rule?
 	local Rule = self.Rules[Key]
 	return if Rule then table.clone(Rule) else nil
 end
 
-function RuleBook:Capture(Object, Key)
+function RuleBook.Capture(self: RuleBook, Object: GuiObject, Key: string)
 	if self.Originals[Key] then
 		return
 	end
@@ -448,16 +529,16 @@ function RuleBook:Capture(Object, Key)
 	}
 end
 
-function RuleBook:Ensure(Object, Key)
-	local Rule = self.Rules[Key]
-	if Rule then
+function RuleBook.Ensure(self: RuleBook, Object: GuiObject, Key: string): Rule
+	local Existing = self.Rules[Key]
+	if Existing then
 		self.Tracked[Object] = Key
-		return Rule
+		return Existing
 	end
 
 	self:Capture(Object, Key)
 
-	Rule = {
+	local Rule: Rule = {
 		Name = Object.Name,
 		IsDeleted = false,
 		Position = Geometry.VisualPosition(Object),
@@ -470,7 +551,7 @@ function RuleBook:Ensure(Object, Key)
 	return Rule
 end
 
-function RuleBook:Apply(Object, Key, Dragging, Yielding)
+function RuleBook.Apply(self: RuleBook, Object: GuiObject, Key: string, Dragging: boolean, Yielding: boolean?): "Adopt"?
 	local Rule = self.Rules[Key]
 	if not Rule or not Object.Parent then
 		return nil
@@ -522,42 +603,44 @@ function RuleBook:Apply(Object, Key, Dragging, Yielding)
 	return nil
 end
 
-function RuleBook:Release(Key)
+function RuleBook.Release(self: RuleBook, Key: string)
 	local Rule = self.Rules[Key]
 	local Original = self.Originals[Key]
 
 	for Object, ObjectKey in self.Tracked do
-		if ObjectKey == Key then
-			if Object.Parent then
-				if self.Hidden[Object] then
-					Object.Visible = true
-				end
+		if ObjectKey ~= Key then
+			continue
+		end
 
-				if Original then
-					Object.Position = Original.Position
-					if Rule and Rule.SizeModified then
-						Object.Size = Original.Size
-					end
-				end
+		if Object.Parent then
+			if self.Hidden[Object] then
+				Object.Visible = true
 			end
 
-			self.Hidden[Object] = nil
-			self.External[Object] = nil
-			self.Tracked[Object] = nil
+			if Original then
+				Object.Position = Original.Position
+				if Rule and Rule.SizeModified then
+					Object.Size = Original.Size
+				end
+			end
 		end
+
+		self.Hidden[Object] = nil
+		self.External[Object] = nil
+		self.Tracked[Object] = nil
 	end
 
 	self.Rules[Key] = nil
 	self.Originals[Key] = nil
 end
 
-function RuleBook:Clear()
+function RuleBook.Clear(self: RuleBook)
 	for Key in table.clone(self.Rules) do
 		self:Release(Key)
 	end
 end
 
-function RuleBook:FindObject(Key)
+function RuleBook.FindObject(self: RuleBook, Key: string): GuiObject?
 	for Object, ObjectKey in self.Tracked do
 		if ObjectKey == Key and Object.Parent then
 			return Object
@@ -567,8 +650,8 @@ function RuleBook:FindObject(Key)
 	return nil
 end
 
-function RuleBook:Counts()
-	local Counts = { Total = 0, Hidden = 0, Moved = 0, Resized = 0 }
+function RuleBook.Counts(self: RuleBook): Counts
+	local Counts: Counts = { Total = 0, Hidden = 0, Moved = 0, Resized = 0 }
 
 	for _, Rule in self.Rules do
 		Counts.Total += 1
@@ -585,19 +668,34 @@ function RuleBook:Counts()
 	return Counts
 end
 
+function RuleBook.IsEmpty(self: RuleBook): boolean
+	return next(self.Rules) == nil
+end
+
+--// History \\
+
 local History = {}
 History.__index = History
 
-function History.new(Limit)
+type HistoryFields = {
+	Undos: { Entry },
+	Redos: { Entry },
+	Limit: number,
+	Changed: Signal<>,
+}
+
+export type History = typeof(setmetatable({} :: HistoryFields, History))
+
+function History.new(Limit: number): History
 	return setmetatable({
 		Undos = {},
 		Redos = {},
 		Limit = Limit,
 		Changed = Signal.new(),
-	}, History)
+	} :: HistoryFields, History)
 end
 
-function History:Push(Label, Changes, Merge)
+function History.Push(self: History, Label: string, Changes: { Change }, Merge: boolean?)
 	if #Changes == 0 then
 		return
 	end
@@ -634,33 +732,35 @@ function History:Push(Label, Changes, Merge)
 	self.Changed:Fire()
 end
 
-function History:PopUndo()
-	local Entry = table.remove(self.Undos)
-	if Entry then
-		table.insert(self.Redos, Entry)
+function History.PopUndo(self: History): Entry?
+	local Item = table.remove(self.Undos)
+	if Item then
+		table.insert(self.Redos, Item)
 		self.Changed:Fire()
 	end
-	return Entry
+	return Item
 end
 
-function History:PopRedo()
-	local Entry = table.remove(self.Redos)
-	if Entry then
-		table.insert(self.Undos, Entry)
+function History.PopRedo(self: History): Entry?
+	local Item = table.remove(self.Redos)
+	if Item then
+		table.insert(self.Undos, Item)
 		self.Changed:Fire()
 	end
-	return Entry
+	return Item
 end
 
-function History:Clear()
+function History.Clear(self: History)
 	table.clear(self.Undos)
 	table.clear(self.Redos)
 	self.Changed:Fire()
 end
 
+--// LayoutBaker \\
+
 local LayoutBaker = {}
 
-function LayoutBaker.Bake(Book, Parent)
+function LayoutBaker.Bake(Book: RuleBook, Parent: Instance?)
 	if not Parent or Book.Baked[Parent] then
 		return
 	end
@@ -675,7 +775,7 @@ function LayoutBaker.Bake(Book, Parent)
 		return
 	end
 
-	local Snapshot = {}
+	local Snapshot: { [GuiObject]: { Position: Vector2, Size: Vector2 } } = {}
 	for _, Child in Parent:GetChildren() do
 		if Child:IsA("GuiObject") and Child.Visible then
 			if Child.AbsoluteSize.X == 0 then
@@ -696,7 +796,7 @@ function LayoutBaker.Bake(Book, Parent)
 
 	local Origin = Parent.AbsolutePosition
 	if Parent:IsA("ScrollingFrame") then
-		Origin = Origin - Parent.CanvasPosition
+		Origin -= Parent.CanvasPosition
 	end
 
 	for Child, Data in Snapshot do
@@ -714,10 +814,12 @@ function LayoutBaker.Bake(Book, Parent)
 	end
 end
 
+--// Picker \\
+
 local Picker = {}
 
-function Picker.IsJoystick(Gui)
-	local Current = Gui
+function Picker.IsJoystick(Gui: Instance): boolean
+	local Current: Instance? = Gui
 
 	while Current and Current:IsA("GuiObject") do
 		local Name = string.lower(Current.Name)
@@ -730,31 +832,26 @@ function Picker.IsJoystick(Gui)
 	return false
 end
 
-function Picker.IsButtonLike(Gui)
+function Picker.IsButtonLike(Gui: GuiObject): boolean
 	return Gui:IsA("GuiButton") or Gui:FindFirstChildWhichIsA("TouchTransmitter") ~= nil
 end
 
-function Picker.HasInteraction(Gui)
+function Picker.HasInteraction(Gui: GuiObject): boolean
 	return Gui:IsA("GuiButton")
 		or Gui:FindFirstChildWhichIsA("TouchTransmitter") ~= nil
 		or Gui:FindFirstChildWhichIsA("GuiButton", true) ~= nil
 		or Gui:FindFirstChildWhichIsA("TouchTransmitter", true) ~= nil
 end
 
-function Picker.FindTop(Hits, Viewport, Accept)
+function Picker.FindTop(Hits: { GuiObject }, Viewport: Vector2, Accept: (GuiObject) -> boolean): GuiObject?
 	local MaxWidth = Viewport.X * Constants.ViewportLimit
 	local MaxHeight = Viewport.Y * Constants.ViewportLimit
 
-	local function Eligible(Gui)
-		if not Accept(Gui) then
-			return false
-		end
-
-		if Gui.AbsoluteSize.X >= MaxWidth or Gui.AbsoluteSize.Y >= MaxHeight then
-			return false
-		end
-
-		return not Picker.IsJoystick(Gui)
+	local function Eligible(Gui: GuiObject): boolean
+		return Accept(Gui)
+			and Gui.AbsoluteSize.X < MaxWidth
+			and Gui.AbsoluteSize.Y < MaxHeight
+			and not Picker.IsJoystick(Gui)
 	end
 
 	for _, Gui in Hits do
@@ -780,18 +877,14 @@ function Picker.FindTop(Hits, Viewport, Accept)
 	return nil
 end
 
-function Picker.Climb(Top, Viewport)
+function Picker.Climb(Top: GuiObject, Viewport: Vector2): GuiObject
 	local MaxWidth = Viewport.X * Constants.ViewportLimit
 	local MaxHeight = Viewport.Y * Constants.ViewportLimit
 	local Current = Top.Parent
 	local Highest = Top
 
 	while Current and Current:IsA("GuiObject") do
-		if Current.AbsoluteSize.X >= MaxWidth or Current.AbsoluteSize.Y >= MaxHeight then
-			break
-		end
-
-		if Picker.IsJoystick(Current) then
+		if Current.AbsoluteSize.X >= MaxWidth or Current.AbsoluteSize.Y >= MaxHeight or Picker.IsJoystick(Current) then
 			break
 		end
 
@@ -830,20 +923,16 @@ function Picker.Climb(Top, Viewport)
 	return Highest
 end
 
-function Picker.Pick(Hits, Viewport, Mode, Accept)
+function Picker.Pick(Hits: { GuiObject }, Viewport: Vector2, Mode: SelectionMode, Accept: (GuiObject) -> boolean): GuiObject?
 	local Top = Picker.FindTop(Hits, Viewport, Accept)
 	if not Top then
 		return nil
 	end
 
-	if Mode == "Exact" then
-		return Top
-	end
-
-	return Picker.Climb(Top, Viewport)
+	return if Mode == "Exact" then Top else Picker.Climb(Top, Viewport)
 end
 
-function Picker.BuildCluster(Target)
+function Picker.BuildCluster(Target: GuiObject): { GuiObject }
 	local Cluster = { Target }
 	local Added = { [Target] = true }
 	local Parent = Target.Parent
@@ -870,7 +959,6 @@ function Picker.BuildCluster(Target)
 
 		if Distance <= Constants.ClusterDistance and Tight then
 			table.insert(Cluster, Parent)
-			Added[Parent] = true
 		end
 	end
 
@@ -892,152 +980,130 @@ function Picker.BuildCluster(Target)
 	return Pure
 end
 
-local Kit = {}
+--// Widgets \\
 
-Kit.Tracked = setmetatable({}, { __mode = "k" })
-Kit.Shadows = {}
-Kit.Alpha = nil
+type Style = {
+	Background: string,
+	Base: number,
+	Text: string,
+	Stroke: boolean?,
+	HoverBase: number?,
+	PressBase: number?,
+}
 
-local ShadowLayerCount = 8
-local MonoFace = Font.new("rbxasset://fonts/families/RobotoMono.json", Enum.FontWeight.Medium, Enum.FontStyle.Normal)
+export type Button = {
+	Root: Frame,
+	Hit: TextButton,
+	Enabled: boolean,
+	SetVariant: (Name: Variant) -> (),
+	SetEnabled: (Value: boolean) -> (),
+	SetText: (Text: string) -> (),
+	SetIcon: (Name: string) -> (),
+	SetReveal: (Alpha: number) -> (),
+	OnActivated: (Callback: () -> ()) -> (),
+}
 
-local ButtonStyles = {
+export type ButtonConfig = {
+	Parent: Instance?,
+	Icon: string?,
+	Text: string?,
+	Variant: Variant?,
+	Size: UDim2?,
+	Position: UDim2?,
+	AnchorPoint: Vector2?,
+	LayoutOrder: number?,
+	Radius: number?,
+	IconSize: number?,
+	TextSize: number?,
+	Gap: number?,
+	Align: "Left"?,
+	Inset: number?,
+	Clip: boolean?,
+	Concealed: boolean?,
+}
+
+export type PanelConfig = {
+	Name: string,
+	Parent: Instance,
+	Size: UDim2,
+	Position: UDim2,
+	AnchorPoint: Vector2?,
+	Radius: number?,
+	ZIndex: number?,
+	AutoY: boolean?,
+	Visible: boolean?,
+}
+
+local Styles: { [Variant]: Style } = {
 	Menu = { Background = "Hover", Base = 1, Text = "Text" },
 	MenuDanger = { Background = "Danger", Base = 1, HoverBase = 0.88, PressBase = 0.8, Text = "Danger" },
-	Subtle = { Background = "DropdownFrame", Base = 0.93, Text = "Text", Stroke = true },
+	Subtle = { Background = "Hover", Base = 0.93, Text = "Text", Stroke = true },
 	Tonal = { Background = "Accent", Base = 0.84, Text = "Text", Stroke = true },
 	Primary = { Background = "FillButton", Base = 0, Text = "FillButtonText" },
 	Active = { Background = "Accent", Base = 0.82, Text = "Text", Stroke = true },
 	Danger = { Background = "Danger", Base = 0.82, Text = "Danger" },
-	Success = { Background = "Success", Base = 0.82, Text = "Success" },
 	Ghost = { Background = "Hover", Base = 1, Text = "SubText" },
 }
 
-local IconObject = {}
-IconObject.__index = IconObject
+local Widgets = {
+	Api = nil :: any,
+	Library = nil :: any,
+}
 
-local ButtonObject = {}
-ButtonObject.__index = ButtonObject
-
-function Kit.Bind(Library)
-	Kit.Library = Library
-	Kit.Creator = Library.Internals.Creator
-	Kit.Alpha = nil
+function Widgets.Bind(Api: any)
+	Widgets.Api = Api
+	Widgets.Library = Api.Library
 end
 
-function Kit.New(ClassName, Properties, Children)
-	return Kit.Creator.New(ClassName, Properties, Children)
+local function New(ClassName: string, Properties: { [string]: any }?, Children: { Instance }?): any
+	return Widgets.Api.Creator.New(ClassName, Properties, Children)
 end
 
-function Kit.Retag(Object, Tags)
-	return Kit.Creator.OverrideTag(Object, Tags)
+local function GetThemeValue(Key: string): any
+	return Widgets.Api.Creator.GetThemeProperty(Key)
 end
 
-function Kit.Corner(Radius)
-	return Kit.New("UICorner", { CornerRadius = UDim.new(0, Radius) })
+function Widgets.Corner(Radius: number): UICorner
+	return New("UICorner", { CornerRadius = UDim.new(0, Radius) })
 end
 
-function Kit.Visibility()
-	local Library = Kit.Library
-	local Window = Library.Window
-	local Opacity = if Window and type(Window.Opacity) == "number" then Window.Opacity else 1
-	return Opacity * (if Library.Transparency then 0.92 else 1)
+function Widgets.Stroke(Key: string, Base: number): UIStroke
+	local Stroke = New("UIStroke", {
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Thickness = 1,
+		ThemeTag = { Color = Key },
+	})
+	Widgets.Library:BindOpacity(Stroke, "Transparency", Base)
+	return Stroke
 end
 
-function Kit.CurrentAlpha()
-	return Kit.Library:GetPanelAlpha() * Kit.Visibility()
-end
-
-function Kit.Scale(Base)
-	return 1 - (1 - Base) * Kit.CurrentAlpha()
-end
-
-function Kit.Track(Object, Property, Base)
-	Kit.Tracked[Object] = { Property = Property, Base = Base }
-	Object[Property] = Kit.Scale(Base)
-end
-
-function Kit.Rebase(Object, Base)
-	local Entry = Kit.Tracked[Object]
-	if Entry then
-		Entry.Base = Base
-	end
-
-	return Kit.Scale(Base)
-end
-
-function Kit.Refresh()
-	local Alpha = Kit.CurrentAlpha()
-	if Kit.Alpha == Alpha then
-		return
-	end
-
-	Kit.Alpha = Alpha
-
-	for Object, Entry in Kit.Tracked do
-		if Object.Parent then
-			Object[Entry.Property] = 1 - (1 - Entry.Base) * Alpha
-		end
-	end
-end
-
-function Kit.Depth(Parent, Strength, Radius, Limit)
-	local Library = Kit.Library
-
-	local Container = Kit.New("Frame", {
-		Name = "Shadow",
-		Size = UDim2.fromScale(1, 1),
-		BackgroundTransparency = 1,
-		ZIndex = 0,
+function Widgets.Padding(Parent: Instance?, Top: number, Right: number, Bottom: number, Left: number): UIPadding
+	return New("UIPadding", {
+		PaddingTop = UDim.new(0, Top),
+		PaddingRight = UDim.new(0, Right),
+		PaddingBottom = UDim.new(0, Bottom),
+		PaddingLeft = UDim.new(0, Left),
 		Parent = Parent,
 	})
-
-	local Layers = {}
-	for Index = ShadowLayerCount, 1, -1 do
-		local Corner = Kit.New("UICorner", {})
-		local Frame = Kit.New("Frame", {
-			Name = "Layer" .. Index,
-			BackgroundColor3 = Color3.new(0, 0, 0),
-			BorderSizePixel = 0,
-			Active = false,
-			Parent = Container,
-		}, { Corner })
-		Layers[Index] = { Frame = Frame, Corner = Corner }
-	end
-
-	local Entry = {
-		Image = Container,
-		Layers = Layers,
-		Radius = Radius or 12,
-		Strength = Strength or 1,
-		Empty = false,
-		VerticalLimit = Limit,
-	}
-
-	Library.Shadows[Container] = Entry
-	table.insert(Kit.Shadows, Container)
-	Library:SetPanelDepth(Library.PanelDepth)
-
-	return Entry
 end
 
-function Kit.Release()
-	local Library = Kit.Library
-
-	for _, Container in Kit.Shadows do
-		Library.Shadows[Container] = nil
-	end
-
-	table.clear(Kit.Shadows)
-	table.clear(Kit.Tracked)
+function Widgets.List(Parent: Instance?, Padding: number, Horizontal: boolean?, Align: Enum.HorizontalAlignment?): UIListLayout
+	return New("UIListLayout", {
+		FillDirection = if Horizontal then Enum.FillDirection.Horizontal else Enum.FillDirection.Vertical,
+		HorizontalAlignment = Align or Enum.HorizontalAlignment.Left,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, Padding),
+		Parent = Parent,
+	})
 end
 
-function Kit.Label(Properties)
+function Widgets.Label(Properties: { [string]: any }): TextLabel
 	local Final = {
 		BackgroundTransparency = 1,
 		TextSize = 12,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		FontFace = Kit.Library:FontFor(Properties.Weight or "Medium"),
+		FontFace = Widgets.Library:FontFor(Properties.Weight or "Medium"),
 		ThemeTag = { TextColor3 = Properties.Tag or "Text" },
 	}
 
@@ -1047,48 +1113,81 @@ function Kit.Label(Properties)
 		end
 	end
 
-	return Kit.New("TextLabel", Final)
+	return New("TextLabel", Final)
 end
 
-function Kit.Surface(Config)
+function Widgets.Retag(Object: Instance, Tags: { [string]: string })
+	Widgets.Api.Creator.OverrideTag(Object, Tags)
+end
+
+function Widgets.Paint(Object: Instance, Base: number, Duration: number?)
+	local Library = Widgets.Library
+	Library:BindOpacity(Object, "BackgroundTransparency", Base, true)
+
+	local Goal = Library:ScaleOpacity(Base)
+	if Duration then
+		Widgets.Api.Creator.Tween(Object, Duration, { BackgroundTransparency = Goal })
+	else
+		(Object :: any).BackgroundTransparency = Goal
+	end
+end
+
+function Widgets.Fill(Properties: { [string]: any }, Tag: string, Base: number, Children: { Instance }?): any
+	local Props = table.clone(Properties)
+	Props.ThemeTag = { BackgroundColor3 = Tag }
+	Props.BorderSizePixel = 0
+
+	local Object = New("Frame", Props, Children)
+	Widgets.Library:BindOpacity(Object, "BackgroundTransparency", Base)
+	return Object
+end
+
+function Widgets.Divider(Parent: Instance, Order: number, Inset: number?): Frame
+	local Holder = New("Frame", {
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, 7),
+		LayoutOrder = Order,
+		Parent = Parent,
+	})
+
+	Widgets.Fill({
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.new(1, -(Inset or 0) * 2, 0, 1),
+		Parent = Holder,
+	}, "ElementBorder", 0.88)
+
+	return Holder
+end
+
+function Widgets.Separator(Parent: Instance, Order: number): Frame
+	return Widgets.Fill({ Size = UDim2.fromOffset(1, 16), LayoutOrder = Order, Parent = Parent }, "ElementBorder", 0.85)
+end
+
+function Widgets.Panel(Config: PanelConfig): (Frame, Frame)
 	local Radius = Config.Radius or 10
 	local AutoY = Config.AutoY == true
 
-	local Shell = Kit.New("Frame", {
-		Name = Config.Name or "Surface",
+	local Shell = New("Frame", {
+		Name = Config.Name,
 		BackgroundTransparency = 1,
-		Size = Config.Size or UDim2.new(),
-		Position = Config.Position or UDim2.new(),
+		Size = Config.Size,
+		Position = Config.Position,
 		AnchorPoint = Config.AnchorPoint or Vector2.zero,
-		LayoutOrder = Config.LayoutOrder or 0,
 		ZIndex = Config.ZIndex or 1,
 		Visible = Config.Visible ~= false,
 		Parent = Config.Parent,
 	})
 
-	if Config.Strength and Config.Strength > 0 then
-		Kit.Depth(Shell, Config.Strength, Radius, Config.Limit)
-	end
+	Widgets.Api:Shadow(Shell, 1, Radius)
 
-	local Stroke = Kit.New("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Thickness = 1,
-		ThemeTag = { Color = Config.Border or "AcrylicBorder" },
-	})
-	Kit.Track(Stroke, "Transparency", Config.BorderBase or 0.35)
-
-	local Fill = Kit.New("Frame", {
+	local Fill = Widgets.Fill({
 		Name = "Fill",
 		Size = if AutoY then UDim2.new(1, 0, 0, 0) else UDim2.fromScale(1, 1),
 		AutomaticSize = if AutoY then Enum.AutomaticSize.Y else Enum.AutomaticSize.None,
-		Active = Config.Active ~= false,
-		ThemeTag = { BackgroundColor3 = Config.Background or "AcrylicMain" },
+		Active = true,
 		Parent = Shell,
-	}, {
-		Kit.Corner(Radius),
-		Stroke,
-	})
-	Kit.Track(Fill, "BackgroundTransparency", Config.Base or 0)
+	}, "AcrylicMain", Constants.PanelBase, { Widgets.Corner(Radius), Widgets.Stroke("AcrylicBorder", 0.35) })
 
 	if AutoY then
 		local function Sync()
@@ -1106,97 +1205,42 @@ function Kit.Surface(Config)
 	return Shell, Fill
 end
 
-function Kit.Divider(Parent, Order, Inset)
-	local Holder = Kit.New("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 7),
-		LayoutOrder = Order,
-		Parent = Parent,
-	})
-
-	local Line = Kit.New("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.new(1, -(Inset or 0) * 2, 0, 1),
-		BorderSizePixel = 0,
-		ThemeTag = { BackgroundColor3 = "ElementBorder" },
-		Parent = Holder,
-	})
-	Kit.Track(Line, "BackgroundTransparency", 0.88)
-
-	return Holder
-end
-
-function Kit.Separator(Parent, Order)
-	local Line = Kit.New("Frame", {
-		Size = UDim2.fromOffset(1, 16),
-		BorderSizePixel = 0,
-		LayoutOrder = Order,
-		ThemeTag = { BackgroundColor3 = "ElementBorder" },
-		Parent = Parent,
-	})
-	Kit.Track(Line, "BackgroundTransparency", 0.85)
-
-	return Line
-end
-
-function Kit.Icon(Config)
-	local Size = Config.Size or 16
-	local Tag = Config.Tag or "Text"
-
-	local Root = Kit.New("Frame", {
+function Widgets.Icon(Parent: Instance, Name: string, Size: number, Tag: string?, Order: number?): { Root: Frame, Set: (Name: string) -> (), SetTag: (Tag: string) -> () }
+	local Root = New("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(Size, Size),
-		LayoutOrder = Config.LayoutOrder or 0,
-		Parent = Config.Parent,
+		LayoutOrder = Order or 0,
+		Parent = Parent,
 	})
 
-	local Image = Kit.New("ImageLabel", {
+	local Image = New("ImageLabel", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
-		ThemeTag = { ImageColor3 = Tag },
+		ThemeTag = { ImageColor3 = Tag or "Text" },
 		Parent = Root,
 	})
 
-	local Glyph = Kit.Label({
-		Size = UDim2.fromScale(1, 1),
-		TextSize = math.max(Size - 4, 8),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Weight = "Bold",
-		Tag = Tag,
-		Visible = false,
-		Parent = Root,
-	})
+	Widgets.Api:Icon(Image, Name)
 
-	local Object = setmetatable({ Root = Root, Image = Image, Glyph = Glyph }, IconObject)
-	Object:Set(Config.Name, Config.Fallback)
-	return Object
+	return {
+		Root = Root,
+		Set = function(Next: string)
+			Widgets.Api:Icon(Image, Next)
+		end,
+		SetTag = function(Next: string)
+			Widgets.Retag(Image, { ImageColor3 = Next })
+		end,
+	}
 end
 
-function IconObject:Set(Name, Fallback)
-	local Applied = false
-
-	if Name then
-		local Success, Result = pcall(Kit.Library.ApplyIcon, Kit.Library, self.Image, Name, nil, nil, "Element")
-		Applied = Success and Result == true
-	end
-
-	self.Image.Visible = Applied
-	self.Glyph.Visible = not Applied and Fallback ~= nil
-	self.Glyph.Text = Fallback or ""
-end
-
-function IconObject:SetTag(Tag)
-	Kit.Retag(self.Image, { ImageColor3 = Tag })
-	Kit.Retag(self.Glyph, { TextColor3 = Tag })
-end
-
-function Kit.Button(Config)
-	local Style = ButtonStyles[Config.Variant or "Subtle"] or ButtonStyles.Subtle
-	local Radius = Config.Radius or 8
+function Widgets.Button(Config: ButtonConfig): Button
+	local Name: Variant = Config.Variant or "Subtle"
+	local Style = Styles[Name]
 	local Aligned = Config.Align == "Left"
+	local Fade = 0
+	local Reveal = if Config.Concealed then 0 else 1
 
-	local Root = Kit.New("Frame", {
+	local Root = New("Frame", {
 		Name = "Button",
 		BackgroundTransparency = 1,
 		Size = Config.Size or UDim2.fromOffset(34, 34),
@@ -1206,19 +1250,10 @@ function Kit.Button(Config)
 		Parent = Config.Parent,
 	})
 
-	if Config.Strength then
-		Kit.Depth(Root, Config.Strength, Radius, 4)
-	end
+	local Stroke = Widgets.Stroke("ElementBorder", 0.9)
+	Stroke.Enabled = Style.Stroke == true
 
-	local Stroke = Kit.New("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Thickness = 1,
-		Enabled = Style.Stroke == true,
-		ThemeTag = { Color = "ElementBorder" },
-	})
-	Kit.Track(Stroke, "Transparency", 0.9)
-
-	local Hit = Kit.New("TextButton", {
+	local Hit = New("TextButton", {
 		Name = "Hit",
 		Text = "",
 		AutoButtonColor = false,
@@ -1226,44 +1261,23 @@ function Kit.Button(Config)
 		Size = UDim2.fromScale(1, 1),
 		ThemeTag = { BackgroundColor3 = Style.Background },
 		Parent = Root,
-	}, {
-		Kit.Corner(Radius),
-		Stroke,
-	})
-	Kit.Track(Hit, "BackgroundTransparency", Style.Base)
+	}, { Widgets.Corner(Config.Radius or 8), Stroke })
+	Widgets.Library:BindOpacity(Hit, "BackgroundTransparency", Style.Base)
 
-	local Content = Kit.New("Frame", {
+	local Content = New("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.fromScale(1, 1),
 		Parent = Hit,
 	}, {
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = if Aligned then Enum.HorizontalAlignment.Left else Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, Config.Gap or 8),
-		}),
-		Kit.New("UIPadding", {
-			PaddingLeft = UDim.new(0, if Aligned then (Config.Inset or 10) else 0),
-		}),
+		Widgets.List(nil, Config.Gap or 8, true, if Aligned then Enum.HorizontalAlignment.Left else Enum.HorizontalAlignment.Center),
+		Widgets.Padding(nil, 0, 0, 0, if Aligned then (Config.Inset or 10) else 0),
 	})
 
-	local Icon = nil
-	if Config.Icon or Config.Fallback then
-		Icon = Kit.Icon({
-			Parent = Content,
-			Name = Config.Icon,
-			Fallback = Config.Fallback,
-			Size = Config.IconSize or 16,
-			Tag = Style.Text,
-			LayoutOrder = 1,
-		})
-	end
-
+	local Icon = if Config.Icon then Widgets.Icon(Content, Config.Icon, Config.IconSize or 16, Style.Text, 1) else nil
 	local Label = nil
+
 	if Config.Text then
-		Label = Kit.Label({
+		Label = Widgets.Label({
 			Parent = Content,
 			Text = Config.Text,
 			Size = UDim2.fromOffset(0, 16),
@@ -1276,237 +1290,204 @@ function Kit.Button(Config)
 		})
 	end
 
-	local Object = setmetatable({
-		Root = Root,
-		Hit = Hit,
-		Stroke = Stroke,
-		Label = Label,
-		Icon = Icon,
-		Style = Style,
-		Enabled = true,
-		Fade = 0,
-		Reveal = if Config.Concealed then 0 else 1,
-	}, ButtonObject)
+	local Object = { Root = Root, Hit = Hit, Enabled = true } :: Button
 
-	Object:Dim()
+	local function Dim()
+		if Label then
+			Label.TextTransparency = 1 - (1 - Fade) * Reveal
+		end
+	end
+
+	local function HoverBase(): number
+		if Style.HoverBase then
+			return Style.HoverBase
+		end
+		return if Style.Base >= 0.99 then (GetThemeValue("HoverTransparency") or 0.945) else math.max(Style.Base - 0.05, 0)
+	end
+
+	local function PressBase(): number
+		if Style.PressBase then
+			return Style.PressBase
+		end
+		return if Style.Base >= 0.99 then (GetThemeValue("PressedTransparency") or 0.906) else math.max(Style.Base - 0.1, 0)
+	end
+
+	Dim()
 
 	Hit.MouseEnter:Connect(function()
 		if Object.Enabled then
-			Object:Paint(Object:HoverBase())
+			Widgets.Paint(Hit, HoverBase(), 0.12)
 		end
 	end)
 
 	Hit.MouseLeave:Connect(function()
-		Object:Paint(Object.Style.Base)
+		Widgets.Paint(Hit, Style.Base, 0.12)
 	end)
 
 	Hit.MouseButton1Down:Connect(function()
 		if Object.Enabled then
-			Object:Paint(Object:PressBase())
+			Widgets.Paint(Hit, PressBase(), 0.12)
 		end
 	end)
 
 	Hit.MouseButton1Up:Connect(function()
 		if Object.Enabled then
-			Object:Paint(Object:HoverBase())
+			Widgets.Paint(Hit, HoverBase(), 0.12)
 		end
 	end)
+
+	function Object.SetVariant(Name: Variant)
+		Style = Styles[Name] or Styles.Subtle
+		Widgets.Retag(Hit, { BackgroundColor3 = Style.Background })
+		Widgets.Paint(Hit, Style.Base)
+		Stroke.Enabled = Style.Stroke == true
+
+		if Label then
+			Widgets.Retag(Label, { TextColor3 = Style.Text })
+		end
+		if Icon then
+			Icon.SetTag(Style.Text)
+		end
+	end
+
+	function Object.SetText(Text: string)
+		if Label then
+			Label.Text = Text
+		end
+	end
+
+	function Object.SetIcon(Name: string)
+		if Icon then
+			Icon.Set(Name)
+		end
+	end
+
+	function Object.SetReveal(Alpha: number)
+		if Reveal ~= Alpha then
+			Reveal = Alpha
+			Dim()
+		end
+	end
+
+	function Object.SetEnabled(Value: boolean)
+		Object.Enabled = Value
+		Fade = if Value then 0 else 0.6
+		Dim()
+
+		if Icon then
+			(Icon.Root :: any):FindFirstChildOfClass("ImageLabel").ImageTransparency = Fade
+		end
+	end
+
+	function Object.OnActivated(Callback: () -> ())
+		Hit.Activated:Connect(function()
+			if Object.Enabled then
+				Callback()
+			end
+		end)
+	end
 
 	return Object
 end
 
-function ButtonObject:HoverBase()
-	local Style = self.Style
+function Widgets.Hold(Target: Button, Action: () -> ())
+	local Api = Widgets.Api
+	local Token = 0
 
-	if Style.HoverBase then
-		return Style.HoverBase
-	end
+	Target.Hit.InputBegan:Connect(function(Input: InputObject)
+		if not Util.IsPointer(Input) or not Target.Enabled then
+			return
+		end
 
-	if Style.Base >= 0.99 then
-		return Kit.Creator.GetThemeProperty("HoverTransparency") or 0.945
-	end
+		Token += 1
+		local Current = Token
 
-	return math.max(Style.Base - 0.05, 0)
+		Action()
+
+		local Release: RBXScriptConnection
+		Release = UserInputService.InputEnded:Connect(function(Ended: InputObject)
+			if Util.IsSameInput(Input, Ended) then
+				if Token == Current then
+					Token += 1
+				end
+				Release:Disconnect()
+			end
+		end)
+
+		task.delay(Constants.RepeatDelay, function()
+			while Token == Current and Api.Alive and Target.Enabled do
+				Action()
+				task.wait(Constants.RepeatInterval)
+			end
+		end)
+	end)
 end
 
-function ButtonObject:PressBase()
-	local Style = self.Style
+function Widgets.Draggable(Handle: GuiObject, Target: GuiObject, IsLocked: (() -> boolean)?, Moving: { Moving: boolean }?, OnEnd: ((Moved: boolean) -> ())?)
+	local Api = Widgets.Api
+	local Held: InputObject? = nil
+	local Origin = Vector3.zero
+	local Start = UDim2.new()
+	local Moved = false
+	local Active = false
 
-	if Style.PressBase then
-		return Style.PressBase
+	local function Mark(Value: boolean)
+		if Moving then
+			Moving.Moving = Value
+		end
 	end
 
-	if Style.Base >= 0.99 then
-		return Kit.Creator.GetThemeProperty("PressedTransparency") or 0.906
-	end
+	Handle.InputBegan:Connect(function(Input: InputObject)
+		if not Util.IsPointer(Input) then
+			return
+		end
 
-	return math.max(Style.Base - 0.1, 0)
-end
+		Held = Input
+		Origin = Input.Position
+		Start = Target.Position
+		Moved = false
+		Active = not (IsLocked and IsLocked())
+		Mark(false)
+	end)
 
-function ButtonObject:Paint(Base)
-	Kit.Creator.Tween(self.Hit, 0.12, { BackgroundTransparency = Kit.Rebase(self.Hit, Base) })
-end
+	Api:Connect(UserInputService.InputChanged, function(Input: InputObject)
+		if not Held or not Util.IsTracking(Held, Input) then
+			return
+		end
 
-function ButtonObject:OnActivated(Callback)
-	return self.Hit.Activated:Connect(function()
-		if self.Enabled then
-			Callback()
+		local Delta = Input.Position - Origin
+
+		if not Moved then
+			if Vector2.new(Delta.X, Delta.Y).Magnitude < Constants.TapThreshold then
+				return
+			end
+
+			Moved = true
+			Start = Target.Position
+			Mark(true)
+		end
+
+		if Active then
+			Target.Position = Util.Shift(Start, Delta.X, Delta.Y)
+		end
+	end)
+
+	Api:Connect(UserInputService.InputEnded, function(Input: InputObject)
+		if not Held or not Util.IsSameInput(Held, Input) then
+			return
+		end
+
+		local Result = Moved
+		Held = nil
+		Mark(false)
+
+		if OnEnd then
+			OnEnd(Result)
 		end
 	end)
 end
 
-function ButtonObject:SetVariant(Name)
-	local Style = ButtonStyles[Name] or ButtonStyles.Subtle
-	self.Style = Style
-
-	Kit.Retag(self.Hit, { BackgroundColor3 = Style.Background })
-	self.Hit.BackgroundTransparency = Kit.Rebase(self.Hit, Style.Base)
-	self.Stroke.Enabled = Style.Stroke == true
-
-	if self.Label then
-		Kit.Retag(self.Label, { TextColor3 = Style.Text })
-	end
-
-	if self.Icon then
-		self.Icon:SetTag(Style.Text)
-	end
-end
-
-function ButtonObject:SetText(Text)
-	if self.Label then
-		self.Label.Text = Text
-	end
-end
-
-function ButtonObject:SetIcon(Name, Fallback)
-	if self.Icon then
-		self.Icon:Set(Name, Fallback)
-	end
-end
-
-function ButtonObject:Dim()
-	if self.Label then
-		self.Label.TextTransparency = 1 - (1 - self.Fade) * self.Reveal
-	end
-end
-
-function ButtonObject:SetReveal(Alpha)
-	if self.Reveal == Alpha then
-		return
-	end
-
-	self.Reveal = Alpha
-	self:Dim()
-end
-
-function ButtonObject:SetEnabled(Enabled)
-	self.Enabled = Enabled
-	self.Fade = if Enabled then 0 else 0.6
-	self:Dim()
-
-	if self.Icon then
-		self.Icon.Image.ImageTransparency = self.Fade
-		self.Icon.Glyph.TextTransparency = self.Fade
-	end
-end
-
-function Kit.MakeDraggable(Handle, Target, Config)
-	Config = Config or {}
-
-	local State = { Input = nil, Origin = Vector3.zero, Start = UDim2.new(), Moved = false, Active = false }
-	local Links = {}
-
-	local function Mark(Value)
-		if Config.Track then
-			Config.Track.Moving = Value
-		end
-	end
-
-	table.insert(
-		Links,
-		Handle.InputBegan:Connect(function(Input)
-			if not Util.IsPointer(Input) then
-				return
-			end
-
-			State.Input = Input
-			State.Origin = Input.Position
-			State.Start = Target.Position
-			State.Moved = false
-			State.Active = not (Config.IsLocked and Config.IsLocked())
-			Mark(false)
-		end)
-	)
-
-	table.insert(
-		Links,
-		UserInputService.InputChanged:Connect(function(Input)
-			if not State.Input then
-				return
-			end
-
-			local Tracking = if State.Input.UserInputType == Enum.UserInputType.Touch
-				then Input == State.Input
-				else Input.UserInputType == Enum.UserInputType.MouseMovement
-
-			if not Tracking then
-				return
-			end
-
-			local Delta = Input.Position - State.Origin
-			if not State.Moved then
-				if Vector2.new(Delta.X, Delta.Y).Magnitude < Constants.TapThreshold then
-					return
-				end
-
-				State.Moved = true
-				State.Start = Target.Position
-				Mark(true)
-			end
-
-			if State.Active then
-				Target.Position = UDim2.new(
-					State.Start.X.Scale,
-					State.Start.X.Offset + Delta.X,
-					State.Start.Y.Scale,
-					State.Start.Y.Offset + Delta.Y
-				)
-			end
-		end)
-	)
-
-	table.insert(
-		Links,
-		UserInputService.InputEnded:Connect(function(Input)
-			if not State.Input then
-				return
-			end
-
-			local MouseRelease = State.Input.UserInputType == Enum.UserInputType.MouseButton1
-				and Input.UserInputType == Enum.UserInputType.MouseButton1
-
-			if Input ~= State.Input and not MouseRelease then
-				return
-			end
-
-			local Moved = State.Moved
-			State.Input = nil
-			Mark(false)
-
-			if Config.OnEnd then
-				Config.OnEnd(Moved)
-			end
-		end)
-	)
-
-	return function()
-		for _, Link in Links do
-			Link:Disconnect()
-		end
-	end
-end
-
-function Kit.Contain(Shell, Viewport)
+function Widgets.Contain(Shell: GuiObject, Viewport: Vector2)
 	local Size = Shell.AbsoluteSize
 	if Size.X <= 0 or Size.Y <= 0 then
 		return
@@ -1519,78 +1500,380 @@ function Kit.Contain(Shell, Viewport)
 	local DeltaX = math.round(math.clamp(Position.X, Margin, MaxX) - Position.X)
 	local DeltaY = math.round(math.clamp(Position.Y, Margin, MaxY) - Position.Y)
 
-	if DeltaX == 0 and DeltaY == 0 then
-		return
+	if DeltaX ~= 0 or DeltaY ~= 0 then
+		Shell.Position = Util.Shift(Shell.Position, DeltaX, DeltaY)
 	end
-
-	local Current = Shell.Position
-	Shell.Position = UDim2.new(
-		Current.X.Scale,
-		Current.X.Offset + DeltaX,
-		Current.Y.Scale,
-		Current.Y.Offset + DeltaY
-	)
 end
 
-function Kit.Host(Parent, Title, Order, Scroll)
-	local Components = Kit.Library.Internals.Components
-
-	local Holder = Components.Section(Title, Parent, {
+function Widgets.Capsule(Parent: Instance, Order: number, Height: number?): Frame
+	return Widgets.Fill({
+		Name = "Capsule",
+		Size = UDim2.fromOffset(0, Height or 30),
+		AutomaticSize = Enum.AutomaticSize.X,
 		LayoutOrder = Order,
-		InModal = true,
+		Parent = Parent,
+	}, "Hover", 0.93, {
+		Widgets.Corner(8),
+		Widgets.Stroke("ElementBorder", 0.9),
+		Widgets.Padding(nil, 2, 2, 2, 2),
+		Widgets.List(nil, 2, true),
+	})
+end
+
+function Widgets.Group(Parent: Instance, Order: number, Items: { { Icon: string?, Text: string?, Width: number?, Variant: Variant? } }): { Button }
+	local Root = Widgets.Capsule(Parent, Order)
+	local Buttons = {}
+
+	for Index, Item in Items do
+		Buttons[Index] = Widgets.Button({
+			Parent = Root,
+			Icon = Item.Icon,
+			Text = Item.Text,
+			Variant = Item.Variant or "Menu",
+			Size = UDim2.fromOffset(Item.Width or 28, 26),
+			Radius = 6,
+			IconSize = 14,
+			TextSize = 11,
+			LayoutOrder = Index,
+		})
+	end
+
+	return Buttons
+end
+
+function Widgets.Row(Parent: Instance, Order: number, Title: string, Height: number?): (Frame, Frame)
+	local Row = New("Frame", {
+		Name = Title,
+		BackgroundTransparency = 1,
+		Size = UDim2.new(1, 0, 0, Height or 36),
+		LayoutOrder = Order,
+		Parent = Parent,
 	})
 
-	local Host = {
-		Type = "Tab",
-		Name = "HUDManager",
-		Container = Holder.Container,
-		Library = Kit.Library,
-	}
+	Widgets.Label({
+		Parent = Row,
+		Text = Title,
+		Position = UDim2.fromOffset(8, 0),
+		Size = UDim2.new(0.35, 0, 1, 0),
+	})
 
-	function Host:GetHolder()
-		return Holder
-	end
+	local Right = New("Frame", {
+		BackgroundTransparency = 1,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -2, 0, 0),
+		Size = UDim2.new(0.65, 0, 1, 0),
+		Parent = Row,
+	}, { Widgets.List(nil, 6, true, Enum.HorizontalAlignment.Right) })
 
-	function Host:NextOrder()
-		return Holder:NextOrder()
-	end
-
-	return Components.SectionApi(Holder, Host, Scroll), Holder
+	return Row, Right
 end
+
+export type Segmented = {
+	Root: Frame,
+	Value: any,
+	SetValue: (Value: any, Silent: boolean?) -> (),
+}
+
+function Widgets.Segmented(Parent: Instance, Order: number, Size: UDim2, Options: { any }, Default: any, Callback: ((Value: any) -> ())?): Segmented
+	local Count = #Options
+	local Root = Widgets.Fill({
+		Name = "Segmented",
+		Size = Size,
+		LayoutOrder = Order,
+		Parent = Parent,
+	}, "Hover", 0.93, {
+		Widgets.Corner(8),
+		Widgets.Stroke("ElementBorder", 0.9),
+		Widgets.Padding(nil, 2, 2, 2, 2),
+		Widgets.List(nil, 2, true),
+	})
+
+	local Buttons: { [any]: Button } = {}
+	local Object = { Root = Root, Value = Default } :: Segmented
+
+	local function Refresh()
+		for Option, Item in Buttons do
+			Item.SetVariant(if Option == Object.Value then "Active" else "Menu")
+		end
+	end
+
+	function Object.SetValue(Value: any, Silent: boolean?)
+		if not Buttons[Value] then
+			return
+		end
+
+		Object.Value = Value
+		Refresh()
+
+		if not Silent and Callback then
+			Callback(Value)
+		end
+	end
+
+	for Index, Option in Options do
+		local Item = Widgets.Button({
+			Parent = Root,
+			Text = tostring(Option),
+			Variant = "Menu",
+			Radius = 6,
+			TextSize = 11,
+			Size = UDim2.new(1 / Count, -(2 * (Count - 1)) / Count, 1, 0),
+			LayoutOrder = Index,
+		})
+		Item.OnActivated(function()
+			Object.SetValue(Option)
+		end)
+		Buttons[Option] = Item
+	end
+
+	Refresh()
+	return Object
+end
+
+export type Switch = {
+	Value: boolean,
+	SetValue: (Value: boolean, Silent: boolean?) -> (),
+}
+
+function Widgets.Switch(Parent: Instance, Default: boolean, Callback: ((Value: boolean) -> ())?): Switch
+	local Hit = New("TextButton", {
+		Text = "",
+		AutoButtonColor = false,
+		Size = UDim2.fromOffset(36, 20),
+		ThemeTag = { BackgroundColor3 = "ToggleSlider" },
+		Parent = Parent,
+	}, { Widgets.Corner(10) })
+
+	local Knob = Widgets.Fill({
+		AnchorPoint = Vector2.new(0, 0.5),
+		Size = UDim2.fromOffset(14, 14),
+		Position = UDim2.new(0, 3, 0.5, 0),
+		Parent = Hit,
+	}, "FillButton", 0, { Widgets.Corner(7) })
+
+	local Object = { Value = Default } :: Switch
+
+	local function Refresh(Animated: boolean)
+		local On = Object.Value
+		Widgets.Retag(Hit, { BackgroundColor3 = if On then "ToggleToggled" else "ToggleSlider" })
+		Widgets.Paint(Hit, if On then 0 else 0.72, if Animated then 0.15 else nil)
+
+		local Goal = if On then UDim2.new(1, -17, 0.5, 0) else UDim2.new(0, 3, 0.5, 0)
+		if Animated then
+			Widgets.Api.Creator.Tween(Knob, 0.15, { Position = Goal })
+		else
+			Knob.Position = Goal
+		end
+	end
+
+	function Object.SetValue(Value: boolean, Silent: boolean?)
+		if Object.Value == Value then
+			return
+		end
+
+		Object.Value = Value
+		Refresh(true)
+
+		if not Silent and Callback then
+			Callback(Value)
+		end
+	end
+
+	Hit.Activated:Connect(function()
+		Object.SetValue(not Object.Value)
+	end)
+
+	Refresh(false)
+	return Object
+end
+
+export type Stepper = {
+	Value: number,
+	SetValue: (Value: number, Silent: boolean?) -> (),
+}
+
+function Widgets.Stepper(Parent: Instance, Min: number, Max: number, Default: number, Suffix: string, Callback: ((Value: number) -> ())?): Stepper
+	local Root = Widgets.Capsule(Parent, 1)
+	local Object = { Value = Default } :: Stepper
+
+	local Minus = Widgets.Button({ Parent = Root, Icon = Constants.Icons.Minus, Variant = "Menu", Size = UDim2.fromOffset(28, 26), Radius = 6, IconSize = 14, LayoutOrder = 1 })
+
+	local Display = Widgets.Label({
+		Parent = Root,
+		Size = UDim2.fromOffset(52, 26),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		FontFace = MonoFace,
+		TextSize = 11,
+		LayoutOrder = 2,
+	})
+
+	local Plus = Widgets.Button({ Parent = Root, Icon = Constants.Icons.Plus, Variant = "Menu", Size = UDim2.fromOffset(28, 26), Radius = 6, IconSize = 14, LayoutOrder = 3 })
+
+	function Object.SetValue(Value: number, Silent: boolean?)
+		Value = math.clamp(Value, Min, Max)
+		Display.Text = Value .. Suffix
+
+		if Object.Value == Value then
+			return
+		end
+
+		Object.Value = Value
+
+		if not Silent and Callback then
+			Callback(Value)
+		end
+	end
+
+	Widgets.Hold(Minus, function()
+		Object.SetValue(Object.Value - 1)
+	end)
+
+	Widgets.Hold(Plus, function()
+		Object.SetValue(Object.Value + 1)
+	end)
+
+	Display.Text = Default .. Suffix
+	return Object
+end
+
+function Widgets.Scroll(Parent: Instance, Order: number, Height: number): ScrollingFrame
+	return New("ScrollingFrame", {
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Size = UDim2.new(1, 0, 0, Height),
+		CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		ScrollingDirection = Enum.ScrollingDirection.Y,
+		ScrollBarThickness = 2,
+		LayoutOrder = Order,
+		ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
+		Parent = Parent,
+	})
+end
+
+function Widgets.Field(Parent: Instance, Order: number, Placeholder: string, OnChanged: (Text: string) -> ()): TextBox
+	local Frame = Widgets.Fill({
+		Size = UDim2.new(1, 0, 0, 30),
+		LayoutOrder = Order,
+		Parent = Parent,
+	}, "Hover", 0.93, {
+		Widgets.Corner(8),
+		Widgets.Stroke("ElementBorder", 0.9),
+	})
+
+	Widgets.Icon(Frame, Constants.Icons.Search, 14, "SubText").Root.Position = UDim2.fromOffset(9, 8)
+
+	local Box = New("TextBox", {
+		BackgroundTransparency = 1,
+		ClearTextOnFocus = false,
+		Text = "",
+		PlaceholderText = Placeholder,
+		Position = UDim2.fromOffset(30, 0),
+		Size = UDim2.new(1, -38, 1, 0),
+		TextSize = 12,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		FontFace = Widgets.Library:FontFor("Medium"),
+		ThemeTag = { TextColor3 = "Text", PlaceholderColor3 = "SubText" },
+		Parent = Frame,
+	})
+
+	Box:GetPropertyChangedSignal("Text"):Connect(function()
+		OnChanged(Box.Text)
+	end)
+
+	return Box
+end
+
+--// Overlay \\
 
 local Overlay = {}
 Overlay.__index = Overlay
 
-function Overlay.Configure(Layer)
-	Layer.IgnoreGuiInset = true
-	Layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	return Layer
-end
+type OverlayFields = {
+	Core: any,
+	Api: any,
+	Ready: boolean,
+	Layer: ScreenGui,
+	ShieldLayer: ScreenGui,
+	Shield: TextButton,
+	PrimaryBox: Frame,
+	ClusterBoxes: { Frame },
+	Tag: TextLabel,
+	TagText: string,
+	TagFlipped: boolean,
+	Launcher: Frame,
+	Dock: Frame,
+	GripLabel: TextLabel,
+	DockButtons: { Button },
+	DockProgress: number,
+	DockHold: number,
+	DockHover: boolean,
+	DockPress: InputObject?,
+	DockLeft: boolean,
+	DockTrack: { Moving: boolean },
+	EditButton: Button,
+	UndoButton: Button,
+	RedoButton: Button,
+	AdvancedButton: Button,
+	ActionBar: Frame,
+	SelectionName: TextLabel,
+	SelectionSize: TextLabel,
+	LockButton: Button,
+	StepLabel: TextLabel,
+	Advanced: Frame,
+	Scroll: ScrollingFrame,
+	PagesBody: Frame,
+	Pages: { [string]: Frame },
+	Tabs: Segmented,
+	ActivePage: string,
+	AdvancedSelection: TextLabel,
+	Controls: { Button },
+	Panels: { Frame },
+	Syncs: { [string]: { (Value: any) -> () } },
+	ReadoutText: string?,
+	Viewport: Vector2,
+	LastMap: number,
+	Map: { Surface: Frame, Ratio: UIAspectRatioConstraint, Boxes: { [GuiObject]: TextButton }, Kinds: { [TextButton]: string } },
+}
 
-function Overlay.new(Core)
-	local Library = Core.Library
+export type Overlay = typeof(setmetatable({} :: OverlayFields, Overlay))
 
-	pcall(Library.RemoveLayer, Library, Constants.OverlayLayer)
-	pcall(Library.RemoveLayer, Library, Constants.ShieldLayer)
+local MapPalette = {
+	Selected = { Tag = "Accent", Transparency = 0.35 },
+	Moved = { Tag = "SubText", Transparency = 0.7 },
+	Hidden = { Tag = "Danger", Transparency = 0.7 },
+}
 
-	local Self = setmetatable({
+function Overlay.new(Core: any, Api: any): Overlay
+	local function Configure(Layer: ScreenGui): ScreenGui
+		Layer.IgnoreGuiInset = true
+		Layer.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+		return Layer
+	end
+
+	local Self: Overlay = setmetatable({
 		Core = Core,
-		Releases = {},
+		Api = Api,
+		Ready = false,
 		ClusterBoxes = {},
-		Controls = {},
-		Hosts = {},
-		OptionIds = {},
 		DockButtons = {},
 		DockProgress = 0,
 		DockHold = 0,
 		DockHover = false,
-		DockPress = nil,
 		DockLeft = false,
 		DockTrack = { Moving = false },
-	}, Overlay)
+		TagText = "",
+		TagFlipped = false,
+		Controls = {},
+		Syncs = {},
+		ActivePage = "Adjust",
+		Viewport = Util.GetViewport(),
+		LastMap = 0,
+		ShieldLayer = Configure(Api:Layer(Constants.ShieldLayer, Constants.ShieldOrder)),
+		Layer = Configure(Api:Layer(Constants.OverlayLayer, Constants.OverlayOrder)),
+	} :: any, Overlay)
 
-	Self.ShieldLayer = Overlay.Configure(Library:CreateLayer(Constants.ShieldLayer, Constants.ShieldOrder))
-	Self.Layer = Overlay.Configure(Library:CreateLayer(Constants.OverlayLayer, Constants.OverlayOrder))
+	Widgets.Bind(Api)
 
 	Self:BuildShield()
 	Self:BuildSelection()
@@ -1603,18 +1886,27 @@ function Overlay.new(Core)
 	Self:SetSelection(nil)
 	Self:WatchDock()
 
-	table.insert(
-		Self.Releases,
-		Util.WatchViewport(function()
-			Self:OnViewport()
-		end)
-	)
-
 	return Self
 end
 
-function Overlay:BuildShield()
-	self.Shield = Kit.New("TextButton", {
+function Overlay.Bind(self: Overlay, Key: string, Apply: (Value: any) -> ())
+	local List = self.Syncs[Key]
+	if not List then
+		List = {}
+		self.Syncs[Key] = List
+	end
+
+	table.insert(List, Apply)
+end
+
+function Overlay.Sync(self: Overlay, Key: string, Value: any)
+	for _, Apply in self.Syncs[Key] or {} do
+		Apply(Value)
+	end
+end
+
+function Overlay.BuildShield(self: Overlay)
+	self.Shield = New("TextButton", {
 		Size = UDim2.fromScale(1, 1),
 		BackgroundTransparency = 1,
 		Text = "",
@@ -1624,64 +1916,63 @@ function Overlay:BuildShield()
 		Parent = self.ShieldLayer,
 	})
 
-	self.Shield.InputBegan:Connect(function(Input)
+	self.Shield.InputBegan:Connect(function(Input: InputObject)
 		self.Core:OnShieldPressed(Input)
 	end)
 end
 
-function Overlay:CreateBox(Primary)
-	local Stroke = Kit.New("UIStroke", {
+function Overlay.CreateBox(self: Overlay, Primary: boolean): Frame
+	local Stroke = New("UIStroke", {
 		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
 		Thickness = if Primary then 2 else 1,
 		Transparency = if Primary then 0.05 else 0.55,
 		ThemeTag = { Color = if Primary then "Accent" else "SubText" },
 	})
 
-	local Box = Kit.New("Frame", {
+	local Box = New("Frame", {
 		BackgroundTransparency = if Primary then 0.9 else 1,
 		Active = false,
 		Visible = false,
 		ZIndex = 1,
 		ThemeTag = { BackgroundColor3 = "Accent" },
 		Parent = self.Layer,
-	}, {
-		Kit.Corner(4),
-		Stroke,
-	})
+	}, { Widgets.Corner(4), Stroke })
 
 	if Primary then
-		self.TagText = ""
-		self.TagFlipped = false
-		self.Tag = Kit.New("TextLabel", {
+		self.Tag = New("TextLabel", {
 			Name = "Tag",
 			AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new(0, 0, 0, -5),
 			Size = UDim2.fromOffset(0, 18),
 			AutomaticSize = Enum.AutomaticSize.X,
-			BackgroundTransparency = 0,
 			BorderSizePixel = 0,
 			Text = "",
 			TextSize = 10,
 			FontFace = MonoFace,
 			ThemeTag = { BackgroundColor3 = "FillButton", TextColor3 = "FillButtonText" },
 			Parent = Box,
-		}, {
-			Kit.Corner(5),
-			Kit.New("UIPadding", {
-				PaddingLeft = UDim.new(0, 7),
-				PaddingRight = UDim.new(0, 7),
-			}),
-		})
+		}, { Widgets.Corner(5), Widgets.Padding(nil, 0, 7, 0, 7) })
 	end
 
 	return Box
 end
 
-function Overlay:BuildSelection()
+function Overlay.BuildSelection(self: Overlay)
 	self.PrimaryBox = self:CreateBox(true)
 end
 
-function Overlay:PlaceTag(Position, Size)
+function Overlay.PlaceBox(self: Overlay, Box: Frame, Object: GuiObject)
+	local Position = Geometry.ScreenPosition(Object)
+	local Size = Object.AbsoluteSize
+
+	Box.Position = UDim2.fromOffset(Position.X, Position.Y)
+	Box.Size = UDim2.fromOffset(Size.X, Size.Y)
+	Box.Visible = true
+
+	if Box ~= self.PrimaryBox then
+		return
+	end
+
 	local Text = string.format("%d x %d", math.round(Size.X), math.round(Size.Y))
 	if self.TagText ~= Text then
 		self.TagText = Text
@@ -1696,20 +1987,7 @@ function Overlay:PlaceTag(Position, Size)
 	end
 end
 
-function Overlay:PlaceBox(Box, Object)
-	local Position = Geometry.ScreenPosition(Object)
-	local Size = Object.AbsoluteSize
-
-	Box.Position = UDim2.fromOffset(Position.X, Position.Y)
-	Box.Size = UDim2.fromOffset(Size.X, Size.Y)
-	Box.Visible = true
-
-	if Box == self.PrimaryBox then
-		self:PlaceTag(Position, Size)
-	end
-end
-
-function Overlay:FitAdvanced(Viewport)
+function Overlay.FitAdvanced(self: Overlay, Viewport: Vector2)
 	if not self.Advanced.Visible then
 		return
 	end
@@ -1722,18 +2000,24 @@ function Overlay:FitAdvanced(Viewport)
 	end
 end
 
-function Overlay:Contain()
+function Overlay.Contain(self: Overlay)
 	local Viewport = Util.GetViewport()
 	self:FitAdvanced(Viewport)
 
 	for _, Shell in self.Panels do
 		if Shell.Visible then
-			Kit.Contain(Shell, Viewport)
+			Widgets.Contain(Shell, Viewport)
 		end
 	end
 end
 
-function Overlay:Reflect(Session)
+function Overlay.Reflect(self: Overlay, Session: Session)
+	local Viewport = Util.GetViewport()
+	if Viewport ~= self.Viewport then
+		self.Viewport = Viewport
+		self.Map.Ratio.AspectRatio = Viewport.X / math.max(Viewport.Y, 1)
+	end
+
 	self:Contain()
 
 	local Primary = Session.Selected
@@ -1754,11 +2038,13 @@ function Overlay:Reflect(Session)
 	for _, Member in Session.Cluster do
 		if Member ~= Primary and Member.Parent and Member.Visible then
 			Used += 1
+
 			local Box = self.ClusterBoxes[Used]
 			if not Box then
 				Box = self:CreateBox(false)
 				self.ClusterBoxes[Used] = Box
 			end
+
 			self:PlaceBox(Box, Member)
 		end
 	end
@@ -1768,75 +2054,49 @@ function Overlay:Reflect(Session)
 	end
 end
 
-function Overlay:BuildLauncher()
-	local Core = self.Core
-
-	local Shell, Fill = Kit.Surface({
+function Overlay.BuildLauncher(self: Overlay)
+	local Shell, Fill = Widgets.Panel({
 		Name = "Launcher",
 		Parent = self.Layer,
 		Size = UDim2.fromOffset(36, 36),
 		Position = UDim2.new(1, -52, 0.5, -18),
 		Radius = 8,
-		Strength = 1,
 		ZIndex = 10,
-		Visible = Core.Settings.ShowLauncher,
+		Visible = false,
 	})
 	self.Launcher = Shell
 
-	local Icon = Kit.Icon({
-		Parent = Fill,
-		Name = Constants.Icons.Launcher,
-		Fallback = Constants.Glyphs.Launcher,
-		Size = 16,
-	})
+	local Icon = Widgets.Icon(Fill, Constants.Icons.Launcher, 16)
 	Icon.Root.AnchorPoint = Vector2.new(0.5, 0.5)
 	Icon.Root.Position = UDim2.fromScale(0.5, 0.5)
 
-	table.insert(
-		self.Releases,
-		Kit.MakeDraggable(Fill, Shell, {
-			OnEnd = function(Moved)
-				if not Moved then
-					self:ToggleDock()
-				end
-			end,
-		})
-	)
+	Widgets.Draggable(Fill, Shell, nil, nil, function(Moved: boolean)
+		if not Moved then
+			self:ToggleDock()
+		end
+	end)
 end
 
-function Overlay:BuildDock()
+function Overlay.BuildDock(self: Overlay)
 	local Core = self.Core
 
-	local Shell, Fill = Kit.Surface({
+	local Shell, Fill = Widgets.Panel({
 		Name = "Dock",
 		Parent = self.Layer,
-		Size = UDim2.fromOffset(Constants.DockCollapsed, 0),
+		Size = UDim2.fromOffset(Constants.Dock.Collapsed, 0),
 		Position = UDim2.new(0, 12, 0.5, 0),
 		AnchorPoint = Vector2.new(0, 0.5),
 		AutoY = true,
 		Radius = 8,
-		Strength = 1,
 		ZIndex = 12,
 		Visible = false,
 	})
 	self.Dock = Shell
 
-	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 2),
-		PaddingBottom = UDim.new(0, 6),
-		PaddingLeft = UDim.new(0, 6),
-		PaddingRight = UDim.new(0, 6),
-		Parent = Fill,
-	})
+	Widgets.Padding(Fill, 2, 6, 6, 6)
+	Widgets.List(Fill, 3, false, Enum.HorizontalAlignment.Center)
 
-	Kit.New("UIListLayout", {
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		Padding = UDim.new(0, 3),
-		Parent = Fill,
-	})
-
-	local Grip = Kit.New("Frame", {
+	local Grip = New("Frame", {
 		Name = "Grip",
 		Size = UDim2.new(1, 0, 0, 16),
 		BackgroundTransparency = 1,
@@ -1845,17 +2105,11 @@ function Overlay:BuildDock()
 		Parent = Fill,
 	})
 
-	local GripIcon = Kit.Icon({
-		Parent = Grip,
-		Name = Constants.Icons.Grip,
-		Fallback = Constants.Glyphs.Grip,
-		Size = 14,
-		Tag = "SubText",
-	})
+	local GripIcon = Widgets.Icon(Grip, Constants.Icons.Grip, 14, "SubText")
 	GripIcon.Root.AnchorPoint = Vector2.new(0, 0.5)
 	GripIcon.Root.Position = UDim2.new(0, 9, 0.5, 0)
 
-	self.GripLabel = Kit.Label({
+	self.GripLabel = Widgets.Label({
 		Parent = Grip,
 		Text = "HUD Manager",
 		Position = UDim2.fromOffset(32, 0),
@@ -1867,13 +2121,12 @@ function Overlay:BuildDock()
 		Weight = "SemiBold",
 	})
 
-	table.insert(self.Releases, Kit.MakeDraggable(Grip, Shell, { Track = self.DockTrack }))
+	Widgets.Draggable(Grip, Shell, nil, self.DockTrack)
 
-	local function AddItem(Order, Icon, Fallback, Text)
-		local Button = Kit.Button({
+	local function AddItem(Order: number, Icon: string, Text: string, Callback: () -> ()): Button
+		local Item = Widgets.Button({
 			Parent = Fill,
 			Icon = Icon,
-			Fallback = Fallback,
 			Text = Text,
 			Variant = "Menu",
 			Align = "Left",
@@ -1884,77 +2137,62 @@ function Overlay:BuildDock()
 			LayoutOrder = Order,
 		})
 
-		table.insert(self.DockButtons, Button)
-		return Button
+		Item.OnActivated(Callback)
+		table.insert(self.DockButtons, Item)
+		return Item
 	end
 
-	self.EditButton = AddItem(2, Constants.Icons.Edit, Constants.Glyphs.Edit, "Edit")
-	self.EditButton:OnActivated(function()
+	self.EditButton = AddItem(2, Constants.Icons.Edit, "Edit", function()
 		Core:SetEditMode(not Core.Session.EditMode)
 	end)
 
-	Kit.Divider(Fill, 3, 4)
+	Widgets.Divider(Fill, 3, 4)
 
-	self.UndoButton = AddItem(4, Constants.Icons.Undo, Constants.Glyphs.Undo, "Undo")
-	self.UndoButton:OnActivated(function()
+	self.UndoButton = AddItem(4, Constants.Icons.Undo, "Undo", function()
 		Core:Undo()
 	end)
 
-	self.RedoButton = AddItem(5, Constants.Icons.Redo, Constants.Glyphs.Redo, "Redo")
-	self.RedoButton:OnActivated(function()
+	self.RedoButton = AddItem(5, Constants.Icons.Redo, "Redo", function()
 		Core:Redo()
 	end)
 
-	Kit.Divider(Fill, 6, 4)
+	Widgets.Divider(Fill, 6, 4)
 
-	AddItem(7, Constants.Icons.Save, Constants.Glyphs.Save, "Save"):OnActivated(function()
+	AddItem(7, Constants.Icons.Save, "Save", function()
 		Core:QuickSave()
 	end)
 
-	self.AdvancedButton = AddItem(8, Constants.Icons.Advanced, Constants.Glyphs.Advanced, "Advanced")
-	self.AdvancedButton:OnActivated(function()
+	self.AdvancedButton = AddItem(8, Constants.Icons.Advanced, "Advanced", function()
 		self:ToggleAdvanced()
 	end)
 
-	AddItem(9, Constants.Icons.Settings, Constants.Glyphs.Settings, "Settings"):OnActivated(function()
+	AddItem(9, Constants.Icons.Settings, "Settings", function()
 		Core:OpenSettings()
 	end)
 
 	self:SetHistoryState(false, false)
 end
 
-function Overlay:BuildActionBar()
+function Overlay.BuildActionBar(self: Overlay)
 	local Core = self.Core
 
-	local Shell, Fill = Kit.Surface({
+	local Shell, Fill = Widgets.Panel({
 		Name = "ActionBar",
 		Parent = self.Layer,
-		Size = UDim2.fromOffset(292, 0),
+		Size = UDim2.fromOffset(372, 0),
 		Position = UDim2.new(0.5, 0, 0, 12),
 		AnchorPoint = Vector2.new(0.5, 0),
 		AutoY = true,
 		Radius = 8,
-		Strength = 1,
 		ZIndex = 11,
 		Visible = false,
 	})
 	self.ActionBar = Shell
 
-	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 4),
-		PaddingBottom = UDim.new(0, 6),
-		PaddingLeft = UDim.new(0, 6),
-		PaddingRight = UDim.new(0, 6),
-		Parent = Fill,
-	})
+	Widgets.Padding(Fill, 4, 6, 6, 6)
+	Widgets.List(Fill, 2)
 
-	Kit.New("UIListLayout", {
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 2),
-		Parent = Fill,
-	})
-
-	local Header = Kit.New("Frame", {
+	local Header = New("Frame", {
 		Name = "Header",
 		Size = UDim2.new(1, 0, 0, 24),
 		BackgroundTransparency = 1,
@@ -1962,9 +2200,9 @@ function Overlay:BuildActionBar()
 		Parent = Fill,
 	})
 
-	self.SelectionName = Kit.Label({
+	self.SelectionName = Widgets.Label({
 		Parent = Header,
-		Text = "Tap an element to select",
+		Text = "",
 		Position = UDim2.fromOffset(6, 0),
 		Size = UDim2.new(1, -96, 1, 0),
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -1972,9 +2210,8 @@ function Overlay:BuildActionBar()
 		Weight = "SemiBold",
 	})
 
-	self.SelectionSize = Kit.Label({
+	self.SelectionSize = Widgets.Label({
 		Parent = Header,
-		Text = "",
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -6, 0, 0),
 		Size = UDim2.new(0, 0, 1, 0),
@@ -1986,61 +2223,48 @@ function Overlay:BuildActionBar()
 		Weight = "Regular",
 	})
 
-	table.insert(
-		self.Releases,
-		Kit.MakeDraggable(Header, Shell, {
-			IsLocked = function()
-				return Core.Session.BarLocked
-			end,
-		})
-	)
+	Widgets.Draggable(Header, Shell, function()
+		return Core.Session.BarLocked
+	end)
 
-	local Row = Kit.New("Frame", {
+	local Row = New("Frame", {
 		Size = UDim2.new(1, 0, 0, 32),
 		BackgroundTransparency = 1,
 		LayoutOrder = 2,
 		Parent = Fill,
-	}, {
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 4),
-		}),
-	})
+	}, { Widgets.List(nil, 4, true, Enum.HorizontalAlignment.Center) })
 
-	local function AddAction(Order, Icon, Fallback, Variant, Dependent)
-		local Button = Kit.Button({
+	local function AddAction(Order: number, Icon: string, Variant: Variant, Dependent: boolean, Callback: (() -> ())?): Button
+		local Item = Widgets.Button({
 			Parent = Row,
 			Icon = Icon,
-			Fallback = Fallback,
 			Variant = Variant,
 			Size = UDim2.fromOffset(38, 30),
 			LayoutOrder = Order,
 		})
 
 		if Dependent then
-			table.insert(self.Controls, Button)
+			table.insert(self.Controls, Item)
+		end
+		if Callback then
+			Item.OnActivated(Callback)
 		end
 
-		return Button
+		return Item
 	end
 
-	self.LockButton = AddAction(1, Constants.Icons.Unlock, Constants.Glyphs.Unlock, "Menu", false)
-	self.LockButton:OnActivated(function()
+	self.LockButton = AddAction(1, Constants.Icons.Unlock, "Menu", false, function()
 		Core:SetBarLocked(not Core.Session.BarLocked)
 	end)
 
-	Kit.Separator(Row, 2)
+	Widgets.Separator(Row, 2)
 
-	self:Hold(AddAction(3, Constants.Icons.Minus, Constants.Glyphs.Minus, "Menu", true), function()
+	Widgets.Hold(AddAction(3, Constants.Icons.Minus, "Menu", true), function()
 		Core:Resize(-Core.Settings.ResizeStep)
 	end)
 
-	self.StepLabel = Kit.Label({
+	self.StepLabel = Widgets.Label({
 		Parent = Row,
-		Text = "",
 		Size = UDim2.fromOffset(38, 30),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextSize = 11,
@@ -2050,22 +2274,32 @@ function Overlay:BuildActionBar()
 		LayoutOrder = 4,
 	})
 
-	self:Hold(AddAction(5, Constants.Icons.Plus, Constants.Glyphs.Plus, "Menu", true), function()
+	Widgets.Hold(AddAction(5, Constants.Icons.Plus, "Menu", true), function()
 		Core:Resize(Core.Settings.ResizeStep)
 	end)
 
-	Kit.Separator(Row, 6)
+	Widgets.Separator(Row, 6)
 
-	AddAction(7, Constants.Icons.Reset, Constants.Glyphs.Reset, "Menu", true):OnActivated(function()
+	AddAction(7, Constants.Icons.CenterX, "Menu", true, function()
+		Core:Align("X")
+	end)
+
+	AddAction(8, Constants.Icons.CenterY, "Menu", true, function()
+		Core:Align("Y")
+	end)
+
+	Widgets.Separator(Row, 9)
+
+	AddAction(10, Constants.Icons.Reset, "Menu", true, function()
 		Core:ResetSelected()
 	end)
 
-	AddAction(8, Constants.Icons.Delete, Constants.Glyphs.Delete, "MenuDanger", true):OnActivated(function()
+	AddAction(11, Constants.Icons.Hide, "MenuDanger", true, function()
 		Core:DeleteSelected()
 	end)
 end
 
-function Overlay:ToggleDock()
+function Overlay.ToggleDock(self: Overlay)
 	self.Dock.Visible = not self.Dock.Visible
 
 	if not self.Dock.Visible then
@@ -2073,42 +2307,30 @@ function Overlay:ToggleDock()
 	end
 end
 
-function Overlay:WatchDock()
+function Overlay.WatchDock(self: Overlay)
+	local Api = self.Api
+
 	local function Extend()
-		self.DockHold = math.max(self.DockHold, os.clock() + Constants.DockHold)
+		self.DockHold = math.max(self.DockHold, os.clock() + Constants.Dock.Hold)
 	end
 
-	self:Listen(UserInputService.InputBegan, function(Input)
-		if not Util.IsPointer(Input) or not self.Dock.Visible then
-			return
-		end
-
-		if Geometry.ContainsInput(self.Dock, Input.Position) then
+	Api:Connect(UserInputService.InputBegan, function(Input: InputObject)
+		if Util.IsPointer(Input) and self.Dock.Visible and Geometry.ContainsInput(self.Dock, Input.Position) then
 			self.DockPress = Input
 			Extend()
 		end
 	end)
 
-	self:Listen(UserInputService.InputEnded, function(Input)
+	Api:Connect(UserInputService.InputEnded, function(Input: InputObject)
 		local Press = self.DockPress
-		if not Press then
-			return
-		end
-
-		local Same = Input == Press
-			or (
-				Press.UserInputType == Enum.UserInputType.MouseButton1
-				and Input.UserInputType == Enum.UserInputType.MouseButton1
-			)
-
-		if Same then
+		if Press and Util.IsSameInput(Press, Input) then
 			self.DockPress = nil
 			Extend()
 		end
 	end)
 end
 
-function Overlay:IsDockActive()
+function Overlay.IsDockActive(self: Overlay): boolean
 	local Dock = self.Dock
 
 	if not Dock.Visible then
@@ -2121,7 +2343,7 @@ function Overlay:IsDockActive()
 	local Hovering = UserInputService.MouseEnabled and Util.PointInGui(UserInputService:GetMouseLocation(), Dock)
 
 	if self.DockHover and not Hovering then
-		self.DockHold = math.max(self.DockHold, Now + Constants.DockLeave)
+		self.DockHold = math.max(self.DockHold, Now + Constants.Dock.Leave)
 	end
 
 	self.DockHover = Hovering
@@ -2129,37 +2351,32 @@ function Overlay:IsDockActive()
 	return Hovering or self.DockPress ~= nil or Now < self.DockHold
 end
 
-function Overlay:ApplyDock(Progress)
+function Overlay.ApplyDock(self: Overlay, Progress: number)
 	local Dock = self.Dock
 	local Before = Dock.Size.X.Offset
-	local Span = Constants.DockExpanded - Constants.DockCollapsed
-	local Width = math.round(Constants.DockCollapsed + Span * Progress)
+	local Width = math.round(Constants.Dock.Collapsed + (Constants.Dock.Expanded - Constants.Dock.Collapsed) * Progress)
 
-	if Before <= Constants.DockCollapsed then
-		local Center = Dock.AbsolutePosition.X + Dock.AbsoluteSize.X / 2
-		self.DockLeft = Center > Util.GetViewport().X / 2
+	if Before <= Constants.Dock.Collapsed then
+		self.DockLeft = Dock.AbsolutePosition.X + Dock.AbsoluteSize.X / 2 > Util.GetViewport().X / 2
 	end
 
 	self.DockProgress = Progress
-
-	local Size = Dock.Size
-	Dock.Size = UDim2.new(0, Width, Size.Y.Scale, Size.Y.Offset)
+	Dock.Size = UDim2.new(0, Width, Dock.Size.Y.Scale, Dock.Size.Y.Offset)
 
 	if self.DockLeft and Width ~= Before and not self.DockTrack.Moving then
-		local Position = Dock.Position
-		Dock.Position = UDim2.new(Position.X.Scale, Position.X.Offset - (Width - Before), Position.Y.Scale, Position.Y.Offset)
+		Dock.Position = Util.Shift(Dock.Position, -(Width - Before), 0)
 	end
 
 	local Alpha = math.clamp((Progress - 0.3) / 0.7, 0, 1)
 
-	for _, Button in self.DockButtons do
-		Button:SetReveal(Alpha)
+	for _, Item in self.DockButtons do
+		Item.SetReveal(Alpha)
 	end
 
 	self.GripLabel.TextTransparency = 1 - Alpha
 end
 
-function Overlay:StepDock(Delta)
+function Overlay.StepDock(self: Overlay, Delta: number)
 	local Target = if self:IsDockActive() then 1 else 0
 	local Progress = self.DockProgress
 
@@ -2173,7 +2390,7 @@ function Overlay:StepDock(Delta)
 	if Config.ReducedMotion or not self.Dock.Visible then
 		Progress = Target
 	else
-		Progress += (Target - Progress) * (1 - math.exp(-Constants.DockSpeed * Speed * (Delta or 0.016)))
+		Progress += (Target - Progress) * (1 - math.exp(-Constants.Dock.Speed * Speed * Delta))
 
 		if math.abs(Target - Progress) < 0.01 then
 			Progress = Target
@@ -2183,17 +2400,13 @@ function Overlay:StepDock(Delta)
 	self:ApplyDock(Progress)
 end
 
-function Overlay:OnViewport()
-	self:Contain()
-
-	local Map = self.Map
-	if Map and Map.Ratio then
-		local Viewport = Util.GetViewport()
-		Map.Ratio.AspectRatio = Viewport.X / math.max(Viewport.Y, 1)
-	end
+function Overlay.SetReady(self: Overlay, Value: boolean)
+	self.Ready = Value
+	self:ApplyLauncher()
 end
 
-function Overlay:SetLauncherVisible(Visible)
+function Overlay.ApplyLauncher(self: Overlay)
+	local Visible = self.Ready and self.Core.Settings.ShowLauncher
 	self.Launcher.Visible = Visible
 
 	if not Visible then
@@ -2201,680 +2414,80 @@ function Overlay:SetLauncherVisible(Visible)
 	end
 end
 
-function Overlay:SetEditState(Enabled)
+function Overlay.SetEditState(self: Overlay, Enabled: boolean)
 	self.Shield.Visible = Enabled
 	self.Shield.Active = Enabled
 	self.ActionBar.Visible = Enabled
-	self.EditButton:SetVariant(if Enabled then "Active" else "Menu")
+	self.EditButton.SetVariant(if Enabled then "Active" else "Menu")
 
 	if not Enabled then
 		self:SetSelection(nil)
 	end
 end
 
-function Overlay:SetBarLocked(Locked)
-	self.LockButton:SetVariant(if Locked then "Active" else "Menu")
-	self.LockButton:SetIcon(
-		if Locked then Constants.Icons.Lock else Constants.Icons.Unlock,
-		if Locked then Constants.Glyphs.Lock else Constants.Glyphs.Unlock
-	)
-
-	local Option = self.Core.Library.Options.HudDockBarLocked
-	if Option and Option.Value ~= Locked then
-		pcall(Option.SetValue, Option, Locked)
-	end
+function Overlay.SetBarLocked(self: Overlay, Locked: boolean)
+	self.LockButton.SetVariant(if Locked then "Active" else "Menu")
+	self.LockButton.SetIcon(if Locked then Constants.Icons.Lock else Constants.Icons.Unlock)
 end
 
-function Overlay:SetHistoryState(CanUndo, CanRedo)
-	self.UndoButton:SetEnabled(CanUndo)
-	self.RedoButton:SetEnabled(CanRedo)
+function Overlay.SetHistoryState(self: Overlay, CanUndo: boolean, CanRedo: boolean)
+	self.UndoButton.SetEnabled(CanUndo)
+	self.RedoButton.SetEnabled(CanRedo)
 end
 
-function Overlay:FormatSize(Object)
+function Overlay.SetResizeStep(self: Overlay, Value: number)
+	self.StepLabel.Text = `{Value}px`
+end
+
+function Overlay.Readout(self: Overlay, Object: GuiObject)
 	local Size = Object.AbsoluteSize
-	return string.format("%d x %d", math.round(Size.X), math.round(Size.Y))
-end
+	local Text = string.format("%d x %d", math.round(Size.X), math.round(Size.Y))
 
-function Overlay:SetResizeStep(Value)
-	self.StepLabel.Text = tostring(Value) .. "px"
-end
-
-function Overlay:Readout(Object)
-	local Size = self:FormatSize(Object)
-	if self.ReadoutText == Size then
+	if self.ReadoutText == Text then
 		return
 	end
 
-	self.ReadoutText = Size
-	self.SelectionSize.Text = Size
-	self.AdvancedSelection.Text = Object.Name .. "  " .. Size
+	self.ReadoutText = Text
+	self.SelectionSize.Text = Text
+	self.AdvancedSelection.Text = `{Object.Name}  {Text}`
 end
 
-function Overlay:SetSelection(Object)
+function Overlay.SetSelection(self: Overlay, Object: GuiObject?)
 	local Valid = Object ~= nil and Object.Parent ~= nil
 
-	if Valid then
-		local Size = self:FormatSize(Object)
-		self.ReadoutText = Size
-		self.SelectionName.Text = if self.Core:IsElementLocked(Object) then Object.Name .. " (locked)" else Object.Name
-		self.SelectionSize.Text = Size
-		self.AdvancedSelection.Text = Object.Name .. "  " .. Size
-		Kit.Retag(self.SelectionName, { TextColor3 = "Text" })
+	if Object and Valid then
+		self.ReadoutText = nil
+		self.SelectionName.Text = if self.Core:IsElementLocked(Object) then `{Object.Name} (locked)` else Object.Name
+		Widgets.Retag(self.SelectionName, { TextColor3 = "Text" })
+		self:Readout(Object)
 	else
 		self.ReadoutText = nil
 		self.SelectionName.Text = "Tap an element to select"
 		self.SelectionSize.Text = ""
 		self.AdvancedSelection.Text = "None"
-		Kit.Retag(self.SelectionName, { TextColor3 = "TextSecondary" })
+		Widgets.Retag(self.SelectionName, { TextColor3 = "TextSecondary" })
 	end
 
 	for _, Control in self.Controls do
-		Control:SetEnabled(Valid)
+		Control.SetEnabled(Valid)
 	end
 end
 
-function Overlay:Destroy()
-	for _, Release in self.Releases do
-		Release()
-	end
-	table.clear(self.Releases)
-
-	for _, Holder in self.Hosts do
-		pcall(Holder.Destroy, Holder)
-	end
-	table.clear(self.Hosts)
-
-	local Library = self.Core.Library
-
-	for _, Idx in self.OptionIds do
-		Library.Options[Idx] = nil
-	end
-	table.clear(self.OptionIds)
-
-	Kit.Release()
-
-	pcall(Library.RemoveLayer, Library, Constants.OverlayLayer)
-	pcall(Library.RemoveLayer, Library, Constants.ShieldLayer)
-end
-
-local Scanner = {}
-
-function Scanner.Track(Core, Object)
-	if not Object:IsA("GuiObject") then
-		return
-	end
-
-	local Book = Core.Book
-	if next(Book.Rules) == nil or Core:IsOwned(Object) then
-		return
-	end
-
-	local Key = KeyResolver.Resolve(Object)
-	if Book.Rules[Key] then
-		Book:Capture(Object, Key)
-		Book.Tracked[Object] = Key
-	end
-end
-
-function Scanner.Rescan(Core)
-	Core.ScanToken += 1
-	local Token = Core.ScanToken
-
-	task.spawn(function()
-		local Success, Descendants = pcall(function()
-			return PlayerGui:GetDescendants()
-		end)
-
-		if not Success then
-			return
-		end
-
-		for Index, Object in Descendants do
-			if Token ~= Core.ScanToken or not Core.Started then
-				return
-			end
-
-			Scanner.Track(Core, Object)
-
-			if Index % Constants.ScanBatch == 0 then
-				task.wait()
-			end
-		end
-	end)
-end
-
-local Enforcer = {}
-
-function Enforcer.Step(Core, Delta)
-	local Session = Core.Session
-	Kit.Refresh()
-	Core.Overlay:Reflect(Session)
-	Core.Overlay:Tick(Delta)
-
-	local Book = Core.Book
-	if next(Book.Rules) == nil then
-		return
-	end
-
-	for Object, Key in Book.Tracked do
-		if not Object.Parent or not Book.Rules[Key] then
-			Book.Tracked[Object] = nil
-		else
-			if not Book.Rules[Key].IsDeleted then
-				LayoutBaker.Bake(Book, Object.Parent)
-			end
-
-			local Result = Book:Apply(Object, Key, Session.DragSet[Object] == true, Core:IsYielding(Object))
-
-			if Result == "Adopt" then
-				Core:AdoptPosition(Object, Key)
-			end
-		end
-	end
-end
-
-local ProfileStore = {}
-
-function ProfileStore.GameFolder(Core)
-	return Core.Folder .. "/Profiles/" .. Core.GameId
-end
-
-function ProfileStore.Path(Core, Name)
-	return ProfileStore.GameFolder(Core) .. "/" .. Name .. ".json"
-end
-
-function ProfileStore.AutoloadPath(Core)
-	return ProfileStore.GameFolder(Core) .. "/autoload.txt"
-end
-
-function ProfileStore.Pack(Rules)
-	local Packed = {}
-
-	for Key, Rule in Rules do
-		Packed[Key] = {
-			Name = Rule.Name,
-			IsDeleted = Rule.IsDeleted,
-			Position = Util.UDim2ToArray(Rule.Position),
-			Size = Util.UDim2ToArray(Rule.Size),
-			SizeModified = Rule.SizeModified,
-		}
-	end
-
-	return Packed
-end
-
-function ProfileStore.Wrap(Core, Rules)
-	return {
-		Version = Constants.FormatVersion,
-		GameId = Core.GameId,
-		GameName = Core.GameName,
-		SavedAt = os.time(),
-		Rules = ProfileStore.Pack(Rules),
-	}
-end
-
-function ProfileStore.Decode(Data)
-	local Source = if type(Data.Rules) == "table" then Data.Rules else Data
-	local Rules = {}
-	local Count = 0
-
-	for Key, Entry in Source do
-		if type(Key) == "string" and type(Entry) == "table" then
-			local Position = Util.ArrayToUDim2(Entry.Position)
-			local Size = Util.ArrayToUDim2(Entry.Size)
-
-			if Position and Size then
-				Rules[Key] = {
-					Name = tostring(Entry.Name or Key),
-					IsDeleted = Entry.IsDeleted == true,
-					Position = Position,
-					Size = Size,
-					SizeModified = Entry.SizeModified == true,
-				}
-				Count += 1
-			end
-		end
-	end
-
-	return Rules, Count
-end
-
-function ProfileStore.List(Core)
-	local Names = {}
-
-	if not Util.HasFileSystem() then
-		return Names
-	end
-
-	local Folder = ProfileStore.GameFolder(Core)
-	if not isfolder(Folder) then
-		return Names
-	end
-
-	for _, File in listfiles(Folder) do
-		local Name = string.match(File, "([^/\\]+)%.json$")
-		if Name then
-			table.insert(Names, Name)
-		end
-	end
-
-	table.sort(Names)
-	return Names
-end
-
-function ProfileStore.Save(Core, Name)
-	Name = Util.SanitizeName(Name)
-
-	if Name == "" then
-		return false, "invalid profile name"
-	end
-
-	if not Util.HasFileSystem() then
-		return false, "file system unavailable"
-	end
-
-	Core:BuildFolderTree()
-
-	local Success, Problem = Util.WriteJson(ProfileStore.Path(Core, Name), ProfileStore.Wrap(Core, Core.Book.Rules))
-	if not Success then
-		return false, Problem
-	end
-
-	Core.ActiveProfile = Name
-	return true
-end
-
-function ProfileStore.Load(Core, Name, Merge)
-	if Util.IsBlank(Name) then
-		return false, "no profile selected"
-	end
-
-	local Data = Util.ReadJson(ProfileStore.Path(Core, Name))
-	if not Data then
-		return false, "profile not found"
-	end
-
-	local Rules = ProfileStore.Decode(Data)
-	Core:ReplaceRules(Rules, Merge, "Load " .. Name)
-	Core.ActiveProfile = Name
-	return true
-end
-
-function ProfileStore.Delete(Core, Name)
-	local Path = ProfileStore.Path(Core, Name)
-
-	if isfile(Path) then
-		delfile(Path)
-	end
-
-	if ProfileStore.GetAutoload(Core) == Name then
-		ProfileStore.SetAutoload(Core, nil)
-	end
-
-	if Core.ActiveProfile == Name then
-		Core.ActiveProfile = nil
-	end
-end
-
-function ProfileStore.GetAutoload(Core)
-	local Path = ProfileStore.AutoloadPath(Core)
-
-	if not Util.HasFileSystem() or not isfile(Path) then
-		return nil
-	end
-
-	local Name = Util.Trim(readfile(Path))
-	if Name ~= "" and isfile(ProfileStore.Path(Core, Name)) then
-		return Name
-	end
-
-	return nil
-end
-
-function ProfileStore.SetAutoload(Core, Name)
-	local Path = ProfileStore.AutoloadPath(Core)
-
-	if Name == nil then
-		if isfile(Path) then
-			delfile(Path)
-		end
-		return true
-	end
-
-	Core:BuildFolderTree()
-	return (pcall(writefile, Path, Name))
-end
-
-function ProfileStore.Export(Core, Name)
-	local Path = ProfileStore.Path(Core, Name)
-
-	if type(setclipboard) ~= "function" or not isfile(Path) then
-		return false, "clipboard or profile unavailable"
-	end
-
-	setclipboard(readfile(Path))
-	return true
-end
-
-function ProfileStore.ImportText(Core, Name, Text)
-	Name = Util.SanitizeName(Name)
-
-	if Name == "" then
-		return false, "invalid profile name"
-	end
-
-	local Decoded, Data = pcall(function()
-		return HttpService:JSONDecode(Text)
-	end)
-
-	if not Decoded or type(Data) ~= "table" then
-		return false, "text is not valid JSON"
-	end
-
-	local Rules, Count = ProfileStore.Decode(Data)
-	if Count == 0 then
-		return false, "no valid rules found"
-	end
-
-	Core:BuildFolderTree()
-
-	local Success, Problem = Util.WriteJson(ProfileStore.Path(Core, Name), ProfileStore.Wrap(Core, Rules))
-	if not Success then
-		return false, Problem
-	end
-
-	return true, Count
-end
-
-function ProfileStore.ImportLegacy(Core)
-	if not Util.HasFileSystem() or not isfolder(Constants.LegacyFolder) then
-		return 0
-	end
-
-	Core:BuildFolderTree()
-
-	local Suffix = "_" .. Core.GameId .. ".json"
-	local Imported = 0
-
-	for _, File in listfiles(Constants.LegacyFolder) do
-		local Normal = string.gsub(File, "\\", "/")
-		local FileName = string.match(Normal, "([^/]+)$") or ""
-
-		if string.sub(FileName, -#Suffix) == Suffix then
-			local Name = Util.SanitizeName(string.sub(FileName, 1, #FileName - #Suffix))
-			local Data = Util.ReadJson(File)
-
-			if Name ~= "" and Data and not isfile(ProfileStore.Path(Core, Name)) then
-				local Rules, Count = ProfileStore.Decode(Data)
-				if Count > 0 and Util.WriteJson(ProfileStore.Path(Core, Name), ProfileStore.Wrap(Core, Rules)) then
-					Imported += 1
-				end
-			end
-		end
-	end
-
-	return Imported
-end
-
-function Kit.Group(Parent, Order, Items)
-	local Stroke = Kit.New("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Thickness = 1,
-		ThemeTag = { Color = "ElementBorder" },
-	})
-	Kit.Track(Stroke, "Transparency", 0.9)
-
-	local Root = Kit.New("Frame", {
-		Name = "Group",
-		Size = UDim2.fromOffset(0, 30),
-		AutomaticSize = Enum.AutomaticSize.X,
-		LayoutOrder = Order,
-		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
-		Parent = Parent,
-	}, {
-		Kit.Corner(8),
-		Stroke,
-		Kit.New("UIPadding", {
-			PaddingTop = UDim.new(0, 2),
-			PaddingBottom = UDim.new(0, 2),
-			PaddingLeft = UDim.new(0, 2),
-			PaddingRight = UDim.new(0, 2),
-		}),
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 2),
-		}),
-	})
-	Kit.Track(Root, "BackgroundTransparency", 0.93)
-
-	local Buttons = {}
-
-	for Index, Item in Items do
-		Buttons[Index] = Kit.Button({
-			Parent = Root,
-			Icon = Item.Icon,
-			Fallback = Item.Fallback,
-			Text = Item.Text,
-			Variant = Item.Variant or "Menu",
-			Size = UDim2.fromOffset(Item.Width or 28, 26),
-			Radius = 6,
-			IconSize = 14,
-			TextSize = 11,
-			LayoutOrder = Index,
-		})
-	end
-
-	return Root, Buttons
-end
-
-function Kit.Row(Parent, Order, Title)
-	local Row = Kit.New("Frame", {
-		Name = Title,
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 36),
-		LayoutOrder = Order,
-		Parent = Parent,
-	})
-
-	Kit.Label({
-		Parent = Row,
-		Text = Title,
-		Position = UDim2.fromOffset(8, 0),
-		Size = UDim2.new(0.35, 0, 1, 0),
-	})
-
-	local Right = Kit.New("Frame", {
-		BackgroundTransparency = 1,
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -2, 0, 0),
-		Size = UDim2.new(0.65, 0, 1, 0),
-		Parent = Row,
-	}, {
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Right,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 6),
-		}),
-	})
-
-	return Row, Right
-end
-
-function Kit.Segmented(Config)
-	local Options = Config.Options
-	local Count = #Options
-
-	local Stroke = Kit.New("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Thickness = 1,
-		ThemeTag = { Color = "ElementBorder" },
-	})
-	Kit.Track(Stroke, "Transparency", 0.9)
-
-	local Root = Kit.New("Frame", {
-		Name = "Segmented",
-		Size = Config.Size,
-		LayoutOrder = Config.LayoutOrder or 0,
-		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
-		Parent = Config.Parent,
-	}, {
-		Kit.Corner(8),
-		Stroke,
-		Kit.New("UIPadding", {
-			PaddingTop = UDim.new(0, 2),
-			PaddingBottom = UDim.new(0, 2),
-			PaddingLeft = UDim.new(0, 2),
-			PaddingRight = UDim.new(0, 2),
-		}),
-		Kit.New("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 2),
-		}),
-	})
-	Kit.Track(Root, "BackgroundTransparency", 0.93)
-
-	local Object = { Root = Root, Value = Config.Default, Buttons = {} }
-
-	local function Paint()
-		for Option, Button in Object.Buttons do
-			Button:SetVariant(if Option == Object.Value then "Active" else "Menu")
-		end
-	end
-
-	function Object:SetValue(Value, Silent)
-		if not self.Buttons[Value] then
-			return
-		end
-
-		self.Value = Value
-		Paint()
-
-		if not Silent and Config.Callback then
-			Config.Callback(Value)
-		end
-	end
-
-	for Index, Option in Options do
-		local Button = Kit.Button({
-			Parent = Root,
-			Text = tostring(Option),
-			Variant = "Menu",
-			Radius = 6,
-			TextSize = 11,
-			Size = UDim2.new(1 / Count, -(2 * (Count - 1)) / Count, 1, 0),
-			LayoutOrder = Index,
-		})
-		Button:OnActivated(function()
-			Object:SetValue(Option)
-		end)
-		Object.Buttons[Option] = Button
-	end
-
-	Paint()
-	return Object
-end
-
-function Overlay:Hold(Button, Action)
-	local Token = 0
-
-	Button.Hit.InputBegan:Connect(function(Input)
-		if not Util.IsPointer(Input) or not Button.Enabled then
-			return
-		end
-
-		Token += 1
-		local Current = Token
-
-		Action()
-
-		local Release
-		Release = UserInputService.InputEnded:Connect(function(Ended)
-			local Same = Ended == Input
-				or (Input.UserInputType == Enum.UserInputType.MouseButton1 and Ended.UserInputType == Enum.UserInputType.MouseButton1)
-
-			if Same then
-				if Token == Current then
-					Token += 1
-				end
-				Release:Disconnect()
-			end
-		end)
-
-		task.delay(Constants.RepeatDelay, function()
-			while Token == Current and self.Core.Started and Button.Enabled do
-				Action()
-				task.wait(Constants.RepeatInterval)
-			end
-		end)
-	end)
-end
-
-function Overlay:Listen(Signal, Handler)
-	local Link = Signal:Connect(Handler)
-
-	table.insert(self.Releases, function()
-		Link:Disconnect()
-	end)
-end
-
-function Overlay:NewPage(Parent, Name)
-	return Kit.New("Frame", {
+function Overlay.NewPage(self: Overlay, Parent: Instance, Name: string): Frame
+	return New("Frame", {
 		Name = Name,
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Visible = false,
 		Parent = Parent,
-	}, {
-		Kit.New("UIListLayout", {
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 2),
-		}),
-	})
+	}, { Widgets.List(nil, 2) })
 end
 
-function Overlay:BuildHost(Parent, Title, Order, Build)
-	local Success, Problem = pcall(function()
-		local Host, Holder = Kit.Host(Parent, Title, Order, self.Scroll)
-		table.insert(self.Hosts, Holder)
-
-		Kit.New("UIPadding", {
-			PaddingBottom = UDim.new(0, 8),
-			Parent = Holder.Root,
-		})
-
-		Build(Host)
-	end)
-
-	if not Success then
-		warn("HUDManager - " .. tostring(Problem))
-	end
-end
-
-function Overlay:AddOption(Host, Method, Idx, Key, Config)
+function Overlay.BuildAdvanced(self: Overlay)
 	local Core = self.Core
 
-	Config.Default = Core.Settings[Key]
-	Config.Callback = function(Value)
-		Core:SetSetting(Key, Value)
-	end
-
-	local Option = Host[Method](Host, Idx, Config)
-	table.insert(self.OptionIds, Idx)
-	Core:BindOption(Key, Idx)
-
-	return Option
-end
-
-function Overlay:BuildAdvanced()
-	local Core = self.Core
-
-	local Shell, Fill = Kit.Surface({
+	local Shell, Fill = Widgets.Panel({
 		Name = "Advanced",
 		Parent = self.Layer,
 		Size = UDim2.fromOffset(340, 0),
@@ -2882,27 +2495,15 @@ function Overlay:BuildAdvanced()
 		AnchorPoint = Vector2.new(0, 0.5),
 		AutoY = true,
 		Radius = 8,
-		Strength = 1,
 		ZIndex = 10,
 		Visible = false,
 	})
 	self.Advanced = Shell
 
-	Kit.New("UIPadding", {
-		PaddingTop = UDim.new(0, 6),
-		PaddingBottom = UDim.new(0, 8),
-		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
-		Parent = Fill,
-	})
+	Widgets.Padding(Fill, 6, 8, 8, 8)
+	Widgets.List(Fill, 6)
 
-	Kit.New("UIListLayout", {
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 6),
-		Parent = Fill,
-	})
-
-	local Header = Kit.New("Frame", {
+	local Header = New("Frame", {
 		Name = "Header",
 		Size = UDim2.new(1, 0, 0, 28),
 		BackgroundTransparency = 1,
@@ -2910,7 +2511,7 @@ function Overlay:BuildAdvanced()
 		Parent = Fill,
 	})
 
-	Kit.Label({
+	Widgets.Label({
 		Parent = Header,
 		Text = "Advanced",
 		Position = UDim2.fromOffset(8, 0),
@@ -2919,90 +2520,72 @@ function Overlay:BuildAdvanced()
 		TextSize = 13,
 	})
 
-	local Close = Kit.Button({
-		Parent = Header,
-		Icon = Constants.Icons.Close,
-		Fallback = Constants.Glyphs.Close,
-		Variant = "Menu",
-		Size = UDim2.fromOffset(26, 26),
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, 0, 0.5, 0),
-		IconSize = 14,
-		Radius = 7,
-	})
-	Close:OnActivated(function()
+	local function HeaderButton(Icon: string, Offset: number, Callback: () -> ())
+		Widgets.Button({
+			Parent = Header,
+			Icon = Icon,
+			Variant = "Menu",
+			Size = UDim2.fromOffset(26, 26),
+			AnchorPoint = Vector2.new(1, 0.5),
+			Position = UDim2.new(1, Offset, 0.5, 0),
+			IconSize = 14,
+			Radius = 7,
+		}).OnActivated(Callback)
+	end
+
+	HeaderButton(Constants.Icons.Close, 0, function()
 		self:SetAdvancedVisible(false)
 	end)
 
-	local Settings = Kit.Button({
-		Parent = Header,
-		Icon = Constants.Icons.Settings,
-		Fallback = Constants.Glyphs.Settings,
-		Variant = "Menu",
-		Size = UDim2.fromOffset(26, 26),
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -30, 0.5, 0),
-		IconSize = 14,
-		Radius = 7,
-	})
-	Settings:OnActivated(function()
+	HeaderButton(Constants.Icons.Settings, -30, function()
 		Core:OpenSettings()
 	end)
 
-	table.insert(self.Releases, Kit.MakeDraggable(Header, Shell))
+	Widgets.Draggable(Header, Shell)
 
-	self.Tabs = Kit.Segmented({
-		Parent = Fill,
-		LayoutOrder = 2,
-		Size = UDim2.new(1, 0, 0, 30),
-		Options = { "Adjust", "Elements", "Map", "Options" },
-		Default = "Adjust",
-		Callback = function(Value)
-			self:SetAdvancedPage(Value)
-		end,
-	})
+	self.Tabs = Widgets.Segmented(Fill, 2, UDim2.new(1, 0, 0, 30), { "Adjust", "Elements", "Map", "Options" }, "Adjust", function(Value: string)
+		self:SetAdvancedPage(Value)
+	end)
 
-	self.Scroll = Kit.New("ScrollingFrame", {
-		Name = "Scroll",
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, 200),
-		CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		ScrollingDirection = Enum.ScrollingDirection.Y,
-		ScrollBarThickness = 2,
-		LayoutOrder = 3,
-		ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
-		Parent = Fill,
-	})
+	self.Scroll = Widgets.Scroll(Fill, 3, 200)
 
-	local Pages = Kit.New("Frame", {
+	self.PagesBody = New("Frame", {
 		Name = "Pages",
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Parent = self.Scroll,
-	}, {
-		Kit.New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }),
-	})
-	self.PagesBody = Pages
+	}, { New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder }) })
 
 	self.Pages = {
-		Adjust = self:BuildAdjustPage(Pages),
-		Elements = self:BuildElementsPage(Pages),
-		Map = self:BuildMapPage(Pages),
-		Options = self:BuildOptionsPage(Pages),
+		Adjust = self:BuildAdjustPage(self.PagesBody),
+		Elements = self:BuildElementsPage(self.PagesBody),
+		Map = self:BuildMapPage(self.PagesBody),
+		Options = self:BuildOptionsPage(self.PagesBody),
 	}
 
 	self:SetAdvancedPage("Adjust")
 end
 
-function Overlay:BuildAdjustPage(Parent)
+function Overlay.AddSegmentRow(self: Overlay, Parent: Instance, Order: number, Title: string, Key: string, Options: { any }, Width: number)
+	local Core = self.Core
+	local _, Right = Widgets.Row(Parent, Order, Title)
+
+	local Item = Widgets.Segmented(Right, 1, UDim2.fromOffset(Width, 28), Options, Core.Settings[Key], function(Value: any)
+		Core:SetSetting(Key, Value)
+	end)
+
+	self:Bind(Key, function(Value: any)
+		Item.SetValue(Value, true)
+	end)
+end
+
+function Overlay.BuildAdjustPage(self: Overlay, Parent: Instance): Frame
 	local Core = self.Core
 	local Page = self:NewPage(Parent, "Adjust")
 
-	local _, SelectionRight = Kit.Row(Page, 1, "Selection")
-	self.AdvancedSelection = Kit.Label({
+	local _, SelectionRight = Widgets.Row(Page, 1, "Selection")
+	self.AdvancedSelection = Widgets.Label({
 		Parent = SelectionRight,
 		Text = "None",
 		Size = UDim2.new(1, 0, 0, 16),
@@ -3012,111 +2595,111 @@ function Overlay:BuildAdjustPage(Parent)
 		Weight = "Regular",
 	})
 
-	Kit.Divider(Page, 2, 6)
+	Widgets.Divider(Page, 2, 6)
 
-	local MoveRow, MoveRight = Kit.Row(Page, 3, "Move")
-	MoveRow.Size = UDim2.new(1, 0, 0, 74)
-
-	local Pad = Kit.New("Frame", {
-		BackgroundTransparency = 1,
-		Size = UDim2.fromOffset(108, 63),
-		Parent = MoveRight,
-	})
+	local _, MoveRight = Widgets.Row(Page, 3, "Move", 74)
+	local Pad = New("Frame", { BackgroundTransparency = 1, Size = UDim2.fromOffset(108, 63), Parent = MoveRight })
 
 	local Cells = {
-		{ Icon = Constants.Icons.Up, Fallback = Constants.Glyphs.Up, Column = 1, Row = 0, X = 0, Y = -1 },
-		{ Icon = Constants.Icons.Left, Fallback = Constants.Glyphs.Left, Column = 0, Row = 1, X = -1, Y = 0 },
-		{ Icon = Constants.Icons.Down, Fallback = Constants.Glyphs.Down, Column = 1, Row = 1, X = 0, Y = 1 },
-		{ Icon = Constants.Icons.Right, Fallback = Constants.Glyphs.Right, Column = 2, Row = 1, X = 1, Y = 0 },
+		{ Icon = Constants.Icons.Up, Column = 1, Row = 0, X = 0, Y = -1 },
+		{ Icon = Constants.Icons.Left, Column = 0, Row = 1, X = -1, Y = 0 },
+		{ Icon = Constants.Icons.Down, Column = 1, Row = 1, X = 0, Y = 1 },
+		{ Icon = Constants.Icons.Right, Column = 2, Row = 1, X = 1, Y = 0 },
 	}
 
 	for _, Cell in Cells do
-		local Button = Kit.Button({
+		local Item = Widgets.Button({
 			Parent = Pad,
 			Icon = Cell.Icon,
-			Fallback = Cell.Fallback,
 			Variant = "Subtle",
 			Size = UDim2.fromOffset(34, 30),
 			Position = UDim2.fromOffset(Cell.Column * 37, Cell.Row * 33),
-			IconSize = 16,
 		})
 
-		table.insert(self.Controls, Button)
+		table.insert(self.Controls, Item)
 
-		self:Hold(Button, function()
+		Widgets.Hold(Item, function()
 			local Step = Core.Settings.NudgeStep
 			Core:Nudge(Cell.X * Step, Cell.Y * Step)
 		end)
 	end
 
-	self:BuildHost(Page, "", 4, function(Host)
-		self:AddOption(Host, "AddSegmented", "HudDockNudgeStep", "NudgeStep", {
-			Title = "Nudge step",
-			Options = Constants.NudgeSteps,
-		})
-	end)
+	self:AddSegmentRow(Page, 4, "Nudge step", "NudgeStep", Constants.NudgeSteps, 160)
 
-	Kit.Divider(Page, 5, 6)
+	Widgets.Divider(Page, 5, 6)
 
-	local _, ResizeRight = Kit.Row(Page, 6, "Resize")
-	local _, ResizeButtons = Kit.Group(ResizeRight, 1, {
-		{ Icon = Constants.Icons.Minus, Fallback = Constants.Glyphs.Minus, Width = 34 },
-		{ Icon = Constants.Icons.Plus, Fallback = Constants.Glyphs.Plus, Width = 34 },
+	local function AddGroup(Order: number, Title: string, Items: { { Icon: string?, Text: string?, Width: number?, Variant: Variant? } }): { Button }
+		local _, Right = Widgets.Row(Page, Order, Title)
+		local Buttons = Widgets.Group(Right, 1, Items)
+
+		for _, Item in Buttons do
+			table.insert(self.Controls, Item)
+		end
+
+		return Buttons
+	end
+
+	local Resize = AddGroup(6, "Resize", {
+		{ Icon = Constants.Icons.Minus, Width = 34 },
+		{ Icon = Constants.Icons.Plus, Width = 34 },
 	})
 
-	self:Hold(ResizeButtons[1], function()
+	Widgets.Hold(Resize[1], function()
 		Core:Resize(-Core.Settings.ResizeStep)
 	end)
 
-	self:Hold(ResizeButtons[2], function()
+	Widgets.Hold(Resize[2], function()
 		Core:Resize(Core.Settings.ResizeStep)
 	end)
 
-	local _, ElementRight = Kit.Row(Page, 7, "Element")
-	local _, ElementButtons = Kit.Group(ElementRight, 1, {
+	local Center = AddGroup(7, "Center", {
+		{ Icon = Constants.Icons.CenterX, Width = 34 },
+		{ Icon = Constants.Icons.CenterY, Width = 34 },
+	})
+
+	Center[1].OnActivated(function()
+		Core:Align("X")
+	end)
+
+	Center[2].OnActivated(function()
+		Core:Align("Y")
+	end)
+
+	local Element = AddGroup(8, "Element", {
 		{ Text = "Reset", Width = 54 },
 		{ Text = "Hide", Width = 48, Variant = "MenuDanger" },
 	})
 
-	ElementButtons[1]:OnActivated(function()
+	Element[1].OnActivated(function()
 		Core:ResetSelected()
 	end)
 
-	ElementButtons[2]:OnActivated(function()
+	Element[2].OnActivated(function()
 		Core:DeleteSelected()
 	end)
-
-	for _, Button in ResizeButtons do
-		table.insert(self.Controls, Button)
-	end
-
-	for _, Button in ElementButtons do
-		table.insert(self.Controls, Button)
-	end
 
 	return Page
 end
 
-function Overlay:BuildElementsPage(Parent)
+function Overlay.BuildElementsPage(self: Overlay, Parent: Instance): Frame
 	local Core = self.Core
 	local Page = self:NewPage(Parent, "Elements")
 	local Filter = "All"
-	local Rows = {}
+	local Query = ""
+	local Rows: { Frame } = {}
 	local Pending = false
-	local ArmedAt = 0
 
-	local Summary = Kit.Label({
+	local Summary = Widgets.Label({
 		Parent = Page,
-		Text = "",
 		Size = UDim2.new(1, 0, 0, 22),
 		TextSize = 11,
 		Tag = "TextSecondary",
 		Weight = "Regular",
 		LayoutOrder = 1,
 	})
-	Kit.New("UIPadding", { PaddingLeft = UDim.new(0, 8), Parent = Summary })
+	Widgets.Padding(Summary, 0, 0, 0, 8)
 
-	local Rebuild
+	local Rebuild: () -> ()
 
 	local function Schedule()
 		if Pending then
@@ -3130,46 +2713,33 @@ function Overlay:BuildElementsPage(Parent)
 		end)
 	end
 
-	Kit.Segmented({
-		Parent = Page,
-		LayoutOrder = 2,
-		Size = UDim2.new(1, 0, 0, 30),
-		Options = { "All", "Hidden", "Moved", "Resized" },
-		Default = Filter,
-		Callback = function(Value)
-			Filter = Value
-			Schedule()
-		end,
-	})
+	Widgets.Field(Page, 2, "Search", function(Text: string)
+		Query = string.lower(Util.Trim(Text))
+		Schedule()
+	end)
 
-	local List = Kit.New("ScrollingFrame", {
-		Name = "List",
-		BackgroundTransparency = 1,
-		BorderSizePixel = 0,
-		Size = UDim2.new(1, 0, 0, 64),
-		ScrollBarThickness = 2,
-		AutomaticCanvasSize = Enum.AutomaticSize.Y,
-		CanvasSize = UDim2.new(),
-		LayoutOrder = 3,
-		ThemeTag = { ScrollBarImageColor3 = "ScrollBar" },
-		Parent = Page,
-	}, {
-		Kit.New("UIListLayout", {
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 4),
-		}),
-	})
+	Widgets.Segmented(Page, 3, UDim2.new(1, 0, 0, 30), { "All", "Hidden", "Moved", "Resized" }, Filter, function(Value: string)
+		Filter = Value
+		Schedule()
+	end)
 
-	local Empty = Kit.Label({
+	local List = Widgets.Scroll(Page, 4, 64)
+	New("UIListLayout", { SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0, 4), Parent = List })
+
+	local Empty = Widgets.Label({
 		Parent = List,
-		Text = "Nothing modified yet",
+		Text = "Nothing to show",
 		Size = UDim2.new(1, 0, 0, 56),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Tag = "TextSecondary",
 		Weight = "Regular",
 	})
 
-	local function Matches(Rule)
+	local function Matches(Key: string, Rule: Rule): boolean
+		if Query ~= "" and not string.find(string.lower(Rule.Name .. " " .. Key), Query, 1, true) then
+			return false
+		end
+
 		if Filter == "Hidden" then
 			return Rule.IsDeleted
 		elseif Filter == "Moved" then
@@ -3181,7 +2751,7 @@ function Overlay:BuildElementsPage(Parent)
 		return true
 	end
 
-	local function Describe(Rule)
+	local function Describe(Rule: Rule): string
 		if Rule.IsDeleted then
 			return "Hidden"
 		end
@@ -3189,26 +2759,14 @@ function Overlay:BuildElementsPage(Parent)
 		return if Rule.SizeModified then "Moved and resized" else "Moved"
 	end
 
-	local function CreateRow(Key, Rule, Order)
-		local Stroke = Kit.New("UIStroke", {
-			ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-			Thickness = 1,
-			ThemeTag = { Color = "ElementBorder" },
-		})
-		Kit.Track(Stroke, "Transparency", 0.92)
-
-		local Row = Kit.New("Frame", {
+	local function CreateRow(Key: string, Rule: Rule, Order: number)
+		local Row = Widgets.Fill({
 			Size = UDim2.new(1, -4, 0, 40),
 			LayoutOrder = Order,
-			ThemeTag = { BackgroundColor3 = "DropdownFrame" },
 			Parent = List,
-		}, {
-			Kit.Corner(8),
-			Stroke,
-		})
-		Kit.Track(Row, "BackgroundTransparency", 0.94)
+		}, "Hover", 0.94, { Widgets.Corner(8), Widgets.Stroke("ElementBorder", 0.92) })
 
-		Kit.New("Frame", {
+		New("Frame", {
 			Name = "Marker",
 			AnchorPoint = Vector2.new(0, 0.5),
 			Position = UDim2.new(0, 7, 0.5, 0),
@@ -3216,9 +2774,9 @@ function Overlay:BuildElementsPage(Parent)
 			BorderSizePixel = 0,
 			ThemeTag = { BackgroundColor3 = if Rule.IsDeleted then "Danger" else "Accent" },
 			Parent = Row,
-		}, { Kit.Corner(2) })
+		}, { Widgets.Corner(2) })
 
-		Kit.Label({
+		Widgets.Label({
 			Parent = Row,
 			Text = Rule.Name,
 			Position = UDim2.fromOffset(18, 5),
@@ -3227,7 +2785,7 @@ function Overlay:BuildElementsPage(Parent)
 			Weight = "SemiBold",
 		})
 
-		Kit.Label({
+		Widgets.Label({
 			Parent = Row,
 			Text = Describe(Rule),
 			Position = UDim2.fromOffset(18, 21),
@@ -3237,34 +2795,25 @@ function Overlay:BuildElementsPage(Parent)
 			Weight = "Regular",
 		})
 
-		local Restore = Kit.Button({
-			Parent = Row,
-			Icon = Constants.Icons.Reset,
-			Fallback = Constants.Glyphs.Reset,
-			Variant = "Menu",
-			Size = UDim2.fromOffset(26, 26),
-			AnchorPoint = Vector2.new(1, 0.5),
-			Position = UDim2.new(1, -6, 0.5, 0),
-			IconSize = 14,
-			Radius = 7,
-		})
-		Restore:OnActivated(function()
+		local function RowButton(Icon: string, Offset: number, Callback: () -> ())
+			Widgets.Button({
+				Parent = Row,
+				Icon = Icon,
+				Variant = "Menu",
+				Size = UDim2.fromOffset(26, 26),
+				AnchorPoint = Vector2.new(1, 0.5),
+				Position = UDim2.new(1, Offset, 0.5, 0),
+				IconSize = 14,
+				Radius = 7,
+			}).OnActivated(Callback)
+		end
+
+		RowButton(Constants.Icons.Reset, -6, function()
 			Core:RestoreKey(Key)
 		end)
 
 		if not Rule.IsDeleted then
-			local Focus = Kit.Button({
-				Parent = Row,
-				Icon = Constants.Icons.Focus,
-				Fallback = Constants.Glyphs.Focus,
-				Variant = "Menu",
-				Size = UDim2.fromOffset(26, 26),
-				AnchorPoint = Vector2.new(1, 0.5),
-				Position = UDim2.new(1, -36, 0.5, 0),
-				IconSize = 14,
-				Radius = 7,
-			})
-			Focus:OnActivated(function()
+			RowButton(Constants.Icons.Focus, -36, function()
 				Core:FocusKey(Key)
 			end)
 		end
@@ -3285,7 +2834,7 @@ function Overlay:BuildElementsPage(Parent)
 		local Order = 0
 		for _, Key in Util.SortedKeys(Core.Book.Rules) do
 			local Rule = Core.Book.Rules[Key]
-			if Matches(Rule) then
+			if Matches(Key, Rule) then
 				Order += 1
 				CreateRow(Key, Rule, Order)
 			end
@@ -3294,154 +2843,124 @@ function Overlay:BuildElementsPage(Parent)
 		Empty.Visible = Order == 0
 		List.Size = UDim2.new(1, 0, 0, math.clamp(Order * 44, 64, 200))
 
-		local Counts = Core.Book:Counts()
-		Summary.Text = string.format(
-			"%d modified  |  %d hidden  |  %d resized  |  %d in history",
-			Counts.Total,
-			Counts.Hidden,
-			Counts.Resized,
-			#Core.History.Undos
-		)
+		local Counts: Counts = Core.Book:Counts()
+		Summary.Text = string.format("%d modified  |  %d hidden  |  %d resized  |  %d in history", Counts.Total, Counts.Hidden, Counts.Resized, #Core.History.Undos)
 	end
 
-	local Reset = Kit.Button({
+	local Armed = 0
+	local ResetAll = Widgets.Button({
 		Parent = Page,
 		Text = "Reset all changes",
 		Variant = "Danger",
 		Size = UDim2.new(1, 0, 0, 30),
-		LayoutOrder = 4,
+		LayoutOrder = 5,
 	})
 
-	Reset:OnActivated(function()
+	ResetAll.OnActivated(function()
 		if Core.Book:Counts().Total == 0 then
-			return Core:Toast("There is nothing to reset")
+			return Core:Toast("Nothing to reset")
 		end
 
-		if ArmedAt > 0 and os.clock() - ArmedAt < 3 then
-			ArmedAt = 0
-			Reset:SetText("Reset all changes")
+		if Armed > 0 and os.clock() - Armed < 3 then
+			Armed = 0
+			ResetAll.SetText("Reset all changes")
 			return Core:ResetAll()
 		end
 
 		local Stamp = os.clock()
-		ArmedAt = Stamp
-		Reset:SetText("Tap again to confirm")
+		Armed = Stamp
+		ResetAll.SetText("Tap again to confirm")
 
 		task.delay(3, function()
-			if ArmedAt == Stamp then
-				ArmedAt = 0
-				Reset:SetText("Reset all changes")
+			if Armed == Stamp then
+				Armed = 0
+				ResetAll.SetText("Reset all changes")
 			end
 		end)
 	end)
 
-	self:Listen(Core.Book.Changed, Schedule)
-	self:Listen(Core.History.Changed, Schedule)
+	self.Api:Connect(Core.Book.Changed, Schedule)
+	self.Api:Connect(Core.History.Changed, Schedule)
 	Rebuild()
 
 	return Page
 end
 
-function Overlay:BuildOptionsPage(Parent)
+function Overlay.BuildOptionsPage(self: Overlay, Parent: Instance): Frame
 	local Core = self.Core
 	local Page = self:NewPage(Parent, "Options")
+	local Order = 0
 
-	self:BuildHost(Page, "Behavior", 1, function(Host)
-		self:AddOption(Host, "AddToggle", "HudDockGroupCluster", "GroupCluster", {
-			Title = "Move linked elements together",
-			Description = "Elements sharing a center are edited as one",
-		})
+	local function Next(): number
+		Order += 1
+		return Order
+	end
 
-		self:AddOption(Host, "AddToggle", "HudDockRespectLocks", "RespectLocks", {
-			Title = "Respect element locks",
-			Description = "Skip elements that lock themselves",
-		})
+	local function AddSwitch(Title: string, Key: string)
+		local _, Right = Widgets.Row(Page, Next(), Title)
 
-		Host:AddToggle("HudDockBarLocked", {
-			Title = "Lock action bar",
-			Description = "Keep the action bar from being dragged",
-			Default = Core.Session.BarLocked,
-			Callback = function(Value)
-				Core:SetBarLocked(Value)
-			end,
-		})
-		table.insert(self.OptionIds, "HudDockBarLocked")
-	end)
+		local Item = Widgets.Switch(Right, Core.Settings[Key], function(Value: boolean)
+			Core:SetSetting(Key, Value)
+		end)
 
-	self:BuildHost(Page, "Selection", 2, function(Host)
-		self:AddOption(Host, "AddSegmented", "HudDockSelectionMode", "SelectionMode", {
-			Title = "Selection mode",
-			Options = { "Smart", "Exact" },
-		})
+		self:Bind(Key, function(Value: boolean)
+			Item.SetValue(Value, true)
+		end)
+	end
 
-		self:AddOption(Host, "AddSegmented", "HudDockAxis", "Axis", {
-			Title = "Drag axis",
-			Options = { "Free", "Horizontal", "Vertical" },
-		})
-	end)
+	local function AddStepper(Title: string, Key: string, Min: number, Max: number)
+		local _, Right = Widgets.Row(Page, Next(), Title)
 
-	self:BuildHost(Page, "Precision", 3, function(Host)
-		self:AddOption(Host, "AddSlider", "HudDockResizeStep", "ResizeStep", {
-			Title = "Resize step",
-			Min = 1,
-			Max = 50,
-			Rounding = 0,
-			Suffix = " px",
-		})
+		local Item = Widgets.Stepper(Right, Min, Max, Core.Settings[Key], " px", function(Value: number)
+			Core:SetSetting(Key, Value)
+		end)
 
-		self:AddOption(Host, "AddSlider", "HudDockSnapSize", "SnapSize", {
-			Title = "Snap to grid",
-			Min = 0,
-			Max = 50,
-			Rounding = 0,
-			Suffix = " px",
-		})
-	end)
+		self:Bind(Key, function(Value: number)
+			Item.SetValue(Value, true)
+		end)
+	end
+
+	AddSwitch("Group linked elements", "GroupCluster")
+	AddSwitch("Respect locks", "RespectLocks")
+	AddSwitch("Shortcuts", "Shortcuts")
+	Widgets.Divider(Page, Next(), 6)
+	self:AddSegmentRow(Page, Next(), "Selection", "SelectionMode", { "Smart", "Exact" }, 130)
+	self:AddSegmentRow(Page, Next(), "Axis", "Axis", { "Free", "Horizontal", "Vertical" }, 190)
+	Widgets.Divider(Page, Next(), 6)
+	AddStepper("Resize step", "ResizeStep", 1, 50)
+	AddStepper("Snap size", "SnapSize", 0, 50)
 
 	return Page
 end
 
-function Overlay:BuildMapPage(Parent)
+function Overlay.BuildMapPage(self: Overlay, Parent: Instance): Frame
 	local Page = self:NewPage(Parent, "Map")
 	local Viewport = Util.GetViewport()
 
-	local Body = Kit.New("Frame", {
+	local Body = New("Frame", {
 		BackgroundTransparency = 1,
 		Size = UDim2.new(1, 0, 0, 180),
 		LayoutOrder = 1,
 		Parent = Page,
 	})
 
-	local Stroke = Kit.New("UIStroke", {
-		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
-		Thickness = 1,
-		ThemeTag = { Color = "ElementBorder" },
-	})
-	Kit.Track(Stroke, "Transparency", 0.85)
-
-	local Ratio = Kit.New("UIAspectRatioConstraint", {
+	local Ratio = New("UIAspectRatioConstraint", {
 		AspectRatio = Viewport.X / math.max(Viewport.Y, 1),
 		DominantAxis = Enum.DominantAxis.Height,
 		AspectType = Enum.AspectType.FitWithinMaxSize,
 	})
 
-	local Surface = Kit.New("Frame", {
+	local Surface = Widgets.Fill({
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromScale(1, 1),
 		ClipsDescendants = true,
-		ThemeTag = { BackgroundColor3 = "DropdownFrame" },
 		Parent = Body,
-	}, {
-		Kit.Corner(8),
-		Stroke,
-		Ratio,
-	})
-	Kit.Track(Surface, "BackgroundTransparency", 0.94)
+	}, "Hover", 0.94, { Widgets.Corner(8), Widgets.Stroke("ElementBorder", 0.85), Ratio })
 
-	local Legend = Kit.Label({
+	local Legend = Widgets.Label({
 		Parent = Page,
-		Text = "Accent is selected, gray is moved, red is hidden. Tap a block to focus it.",
+		Text = "Accent selected, gray moved, red hidden",
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		TextWrapped = true,
@@ -3450,29 +2969,14 @@ function Overlay:BuildMapPage(Parent)
 		Weight = "Regular",
 		LayoutOrder = 2,
 	})
-	Kit.New("UIPadding", {
-		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
-		PaddingTop = UDim.new(0, 4),
-		Parent = Legend,
-	})
+	Widgets.Padding(Legend, 4, 8, 0, 8)
 
-	self.Map = {
-		Surface = Surface,
-		Ratio = Ratio,
-		Boxes = {},
-		Kinds = {},
-		Palette = {
-			Selected = { Background = "Accent", Transparency = 0.35 },
-			Moved = { Background = "SubText", Transparency = 0.7 },
-			Hidden = { Background = "Danger", Transparency = 0.7 },
-		},
-	}
+	self.Map = { Surface = Surface, Ratio = Ratio, Boxes = {}, Kinds = {} }
 
 	return Page
 end
 
-function Overlay:DrawMap(Object, Kind, Screen, Seen)
+function Overlay.DrawMap(self: Overlay, Object: GuiObject, Kind: string, Screen: Vector2, Seen: { [GuiObject]: boolean })
 	local Map = self.Map
 
 	if not Object.Parent or Seen[Object] then
@@ -3481,25 +2985,29 @@ function Overlay:DrawMap(Object, Kind, Screen, Seen)
 
 	Seen[Object] = true
 
+	local Palette = MapPalette[Kind]
 	local Box = Map.Boxes[Object]
+
 	if not Box then
-		Box = Kit.New("TextButton", {
+		Box = New("TextButton", {
 			Text = "",
 			AutoButtonColor = false,
 			BorderSizePixel = 0,
-			ThemeTag = { BackgroundColor3 = Map.Palette[Kind].Background },
+			ThemeTag = { BackgroundColor3 = Palette.Tag },
 			Parent = Map.Surface,
 		})
+
 		Box.Activated:Connect(function()
 			self.Core:FocusObject(Object)
 		end)
+
 		Map.Boxes[Object] = Box
 	end
 
 	if Map.Kinds[Box] ~= Kind then
 		Map.Kinds[Box] = Kind
-		Kit.Retag(Box, { BackgroundColor3 = Map.Palette[Kind].Background })
-		Box.BackgroundTransparency = Map.Palette[Kind].Transparency
+		Widgets.Retag(Box, { BackgroundColor3 = Palette.Tag })
+		Box.BackgroundTransparency = Palette.Transparency
 	end
 
 	local Position = Geometry.ScreenPosition(Object)
@@ -3509,7 +3017,7 @@ function Overlay:DrawMap(Object, Kind, Screen, Seen)
 	Box.Size = UDim2.fromScale(math.max(Size.X / Screen.X, 0.008), math.max(Size.Y / Screen.Y, 0.008))
 end
 
-function Overlay:SyncMap()
+function Overlay.SyncMap(self: Overlay)
 	local Map = self.Map
 	local Screen = Util.GetViewport()
 
@@ -3517,8 +3025,9 @@ function Overlay:SyncMap()
 		return
 	end
 
-	local Seen = {}
-	local Session = self.Core.Session
+	local Seen: { [GuiObject]: boolean } = {}
+	local Core = self.Core
+	local Session: Session = Core.Session
 
 	if Session.Selected then
 		self:DrawMap(Session.Selected, "Selected", Screen, Seen)
@@ -3528,8 +3037,8 @@ function Overlay:SyncMap()
 		self:DrawMap(Member, "Selected", Screen, Seen)
 	end
 
-	for Object, Key in self.Core.Book.Tracked do
-		local Rule = self.Core.Book.Rules[Key]
+	for Object, Key in Core.Book.Tracked do
+		local Rule = Core.Book.Rules[Key]
 		if Rule then
 			self:DrawMap(Object, if Rule.IsDeleted then "Hidden" else "Moved", Screen, Seen)
 		end
@@ -3544,26 +3053,21 @@ function Overlay:SyncMap()
 	end
 end
 
-function Overlay:Tick(Delta)
+function Overlay.Tick(self: Overlay, Delta: number)
 	self:StepDock(Delta)
-	self:StepMap()
-end
 
-function Overlay:StepMap()
 	if not self.Advanced.Visible or self.ActivePage ~= "Map" then
 		return
 	end
 
 	local Now = os.clock()
-	if Now - (self.LastMap or 0) < Constants.MapInterval then
-		return
+	if Now - self.LastMap >= Constants.MapInterval then
+		self.LastMap = Now
+		self:SyncMap()
 	end
-
-	self.LastMap = Now
-	self:SyncMap()
 end
 
-function Overlay:SetAdvancedPage(Name)
+function Overlay.SetAdvancedPage(self: Overlay, Name: string)
 	self.ActivePage = Name
 
 	for Key, Page in self.Pages do
@@ -3575,113 +3079,340 @@ function Overlay:SetAdvancedPage(Name)
 	end
 end
 
-function Overlay:SetAdvancedVisible(Visible)
+function Overlay.SetAdvancedVisible(self: Overlay, Visible: boolean)
 	self.Advanced.Visible = Visible
-	self.AdvancedButton:SetVariant(if Visible then "Active" else "Menu")
+	self.AdvancedButton.SetVariant(if Visible then "Active" else "Menu")
 
 	if Visible and self.ActivePage == "Map" then
 		self:SyncMap()
 	end
 end
 
-function Overlay:ToggleAdvanced()
+function Overlay.ToggleAdvanced(self: Overlay)
 	self:SetAdvancedVisible(not self.Advanced.Visible)
 end
 
-local function NewSession()
+--// ProfileStore \\
+
+local ProfileStore = {}
+
+function ProfileStore.GameFolder(Core: any): string
+	return `{Core.Folder}/Profiles/{Core.GameId}`
+end
+
+function ProfileStore.Path(Core: any, Name: string): string
+	return `{ProfileStore.GameFolder(Core)}/{Name}.json`
+end
+
+function ProfileStore.AutoloadPath(Core: any): string
+	return `{ProfileStore.GameFolder(Core)}/autoload.txt`
+end
+
+function ProfileStore.Pack(Rules: { [string]: Rule }): { [string]: PackedRule }
+	local Packed = {}
+
+	for Key, Rule in Rules do
+		Packed[Key] = {
+			Name = Rule.Name,
+			IsDeleted = Rule.IsDeleted,
+			Position = Util.PackUDim2(Rule.Position),
+			Size = Util.PackUDim2(Rule.Size),
+			SizeModified = Rule.SizeModified,
+		}
+	end
+
+	return Packed
+end
+
+function ProfileStore.Wrap(Core: any, Rules: { [string]: Rule }): Profile
 	return {
-		EditMode = false,
-		Selected = nil,
-		Cluster = {},
-		BarLocked = false,
-		DragInput = nil,
-		DragOrigin = Vector3.zero,
-		DragMoved = false,
-		DragSet = {},
-		DragStart = {},
-		DragKeys = {},
-		DragBefore = {},
+		Version = Constants.FormatVersion,
+		GameId = Core.GameId,
+		GameName = Core.GameName,
+		SavedAt = os.time(),
+		Rules = ProfileStore.Pack(Rules),
 	}
 end
 
-local function NewSettings()
+function ProfileStore.Decode(Data: { [any]: any }): ({ [string]: Rule }, number)
+	local Source = if type(Data.Rules) == "table" then Data.Rules else Data
+	local Rules: { [string]: Rule } = {}
+	local Count = 0
+
+	for Key, Item in Source do
+		if type(Key) ~= "string" or type(Item) ~= "table" then
+			continue
+		end
+
+		local Position = Util.UnpackUDim2(Item.Position)
+		local Size = Util.UnpackUDim2(Item.Size)
+
+		if Position and Size then
+			Rules[Key] = {
+				Name = tostring(Item.Name or Key),
+				IsDeleted = Item.IsDeleted == true,
+				Position = Position,
+				Size = Size,
+				SizeModified = Item.SizeModified == true,
+			}
+			Count += 1
+		end
+	end
+
+	return Rules, Count
+end
+
+function ProfileStore.List(Core: any): { string }
+	local Names = {}
+	local Folder = ProfileStore.GameFolder(Core)
+
+	if not Util.HasFileSystem() or not isfolder(Folder) then
+		return Names
+	end
+
+	for _, File in listfiles(Folder) do
+		local Name = string.match(File, "([^/\\]+)%.json$")
+		if Name then
+			table.insert(Names, Name)
+		end
+	end
+
+	table.sort(Names)
+	return Names
+end
+
+function ProfileStore.Write(Core: any, Name: string, Rules: { [string]: Rule }): (boolean, string?)
+	if Name == "" then
+		return false, "invalid profile name"
+	end
+
+	if not Util.HasFileSystem() then
+		return false, "file system unavailable"
+	end
+
+	Core:BuildFolderTree()
+	return Util.WriteJson(ProfileStore.Path(Core, Name), ProfileStore.Wrap(Core, Rules))
+end
+
+function ProfileStore.Save(Core: any, Name: string): (boolean, string?)
+	Name = Util.SanitizeName(Name)
+
+	local Success, Problem = ProfileStore.Write(Core, Name, Core.Book.Rules)
+	if Success then
+		Core.ActiveProfile = Name
+	end
+
+	return Success, Problem
+end
+
+function ProfileStore.Load(Core: any, Name: string?, Merge: boolean): (boolean, string?)
+	if Util.IsBlank(Name) then
+		return false, "no profile selected"
+	end
+
+	local Data = Util.ReadJson(ProfileStore.Path(Core, Name :: string))
+	if not Data then
+		return false, "profile not found"
+	end
+
+	local Rules = ProfileStore.Decode(Data)
+	Core:ReplaceRules(Rules, Merge, `Load {Name}`)
+	Core.ActiveProfile = Name
+	return true, nil
+end
+
+function ProfileStore.GetAutoload(Core: any): string?
+	local Path = ProfileStore.AutoloadPath(Core)
+
+	if not Util.HasFileSystem() or not isfile(Path) then
+		return nil
+	end
+
+	local Name = Util.Trim(readfile(Path))
+	return if Name ~= "" and isfile(ProfileStore.Path(Core, Name)) then Name else nil
+end
+
+function ProfileStore.SetAutoload(Core: any, Name: string?): boolean
+	local Path = ProfileStore.AutoloadPath(Core)
+
+	if Name == nil then
+		if isfile(Path) then
+			delfile(Path)
+		end
+		return true
+	end
+
+	Core:BuildFolderTree()
+	return (pcall(writefile, Path, Name))
+end
+
+function ProfileStore.Delete(Core: any, Name: string)
+	local Path = ProfileStore.Path(Core, Name)
+
+	if isfile(Path) then
+		delfile(Path)
+	end
+
+	if ProfileStore.GetAutoload(Core) == Name then
+		ProfileStore.SetAutoload(Core, nil)
+	end
+
+	if Core.ActiveProfile == Name then
+		Core.ActiveProfile = nil
+	end
+end
+
+function ProfileStore.Export(Core: any, Name: string): (boolean, string?)
+	local Path = ProfileStore.Path(Core, Name)
+
+	if type(setclipboard) ~= "function" or not isfile(Path) then
+		return false, "clipboard or profile unavailable"
+	end
+
+	setclipboard(readfile(Path))
+	return true, nil
+end
+
+function ProfileStore.ImportText(Core: any, Name: string, Text: string): (boolean, any)
+	local Decoded, Data = pcall(HttpService.JSONDecode, HttpService, Text)
+	if not Decoded or type(Data) ~= "table" then
+		return false, "text is not valid JSON"
+	end
+
+	local Rules, Count = ProfileStore.Decode(Data)
+	if Count == 0 then
+		return false, "no valid rules found"
+	end
+
+	local Success, Problem = ProfileStore.Write(Core, Util.SanitizeName(Name), Rules)
+	if not Success then
+		return false, Problem
+	end
+
+	return true, Count
+end
+
+function ProfileStore.ImportLegacy(Core: any): number
+	if not Util.HasFileSystem() or not isfolder(Constants.LegacyFolder) then
+		return 0
+	end
+
+	local Suffix = `_{Core.GameId}.json`
+	local Imported = 0
+
+	for _, File in listfiles(Constants.LegacyFolder) do
+		local FileName = string.match(string.gsub(File, "\\", "/"), "([^/]+)$") or ""
+
+		if string.sub(FileName, -#Suffix) ~= Suffix then
+			continue
+		end
+
+		local Name = Util.SanitizeName(string.sub(FileName, 1, #FileName - #Suffix))
+		local Data = Util.ReadJson(File)
+
+		if Name ~= "" and Data and not isfile(ProfileStore.Path(Core, Name)) then
+			local Rules, Count = ProfileStore.Decode(Data)
+			if Count > 0 and ProfileStore.Write(Core, Name, Rules) then
+				Imported += 1
+			end
+		end
+	end
+
+	return Imported
+end
+
+--// Controller \\
+
+local Directions: { [Enum.KeyCode]: Vector2 } = {
+	[Enum.KeyCode.Left] = Vector2.new(-1, 0),
+	[Enum.KeyCode.Right] = Vector2.new(1, 0),
+	[Enum.KeyCode.Up] = Vector2.new(0, -1),
+	[Enum.KeyCode.Down] = Vector2.new(0, 1),
+}
+
+local function NewSession(): Session
+	return { EditMode = false, Selected = nil, Cluster = {}, BarLocked = false, Drag = nil }
+end
+
+local function NewSettings(): Settings
 	return {
 		ResizeStep = 15,
+		NudgeStep = 5,
 		SnapSize = 0,
 		Axis = "Free",
 		SelectionMode = "Smart",
 		GroupCluster = true,
 		ShowLauncher = true,
 		RespectLocks = true,
+		Shortcuts = true,
 		LoadMode = "Replace",
-		NudgeStep = 5,
 	}
 end
 
 local HUDManager = {}
-HUDManager.Version = Constants.Version
-HUDManager.Folder = "HUDManager"
-HUDManager.Library = nil
-HUDManager.Extension = nil
-HUDManager.SaveManager = nil
-HUDManager.Started = false
-HUDManager.GameId = tostring(if game.GameId > 0 then game.GameId else game.PlaceId)
-HUDManager.GameName = "UnknownGame"
-HUDManager.ActiveProfile = nil
-HUDManager.ScanToken = 0
-HUDManager.Settings = NewSettings()
-HUDManager.Session = NewSession()
-HUDManager.Bindings = {}
-HUDManager.Presses = {}
-HUDManager.Signals = {
-	StateChanged = Signal.new(),
-	SelectionChanged = Signal.new(),
-	SettingChanged = Signal.new(),
+HUDManager.__index = HUDManager
+
+type ManagerFields = {
+	Version: string,
+	Folder: string,
+	Library: any,
+	Extension: any,
+	SaveManager: any,
+	Api: any,
+	Overlay: Overlay,
+	Book: RuleBook,
+	History: History,
+	Tab: any,
+	ControlSection: any,
+	Started: boolean,
+	GameId: string,
+	GameName: string,
+	ActiveProfile: string?,
+	ScanToken: number,
+	Settings: Settings,
+	Session: Session,
+	Bindings: { [string]: { string } },
+	Presses: { [InputObject]: Press },
+	Signals: {
+		StateChanged: Signal<boolean>,
+		SelectionChanged: Signal<GuiObject?>,
+		SettingChanged: Signal<string, any>,
+	},
 }
 
-function HUDManager:SetLibrary(Library)
+export type Manager = typeof(setmetatable({} :: ManagerFields, HUDManager))
+
+function HUDManager.SetLibrary(self: Manager, Library: any)
 	self.Library = Library
 end
 
-function HUDManager:SetExtension(Extension)
+function HUDManager.SetExtension(self: Manager, Extension: any)
 	self.Extension = Extension
 end
 
-function HUDManager:SetSaveManager(SaveManager)
+function HUDManager.SetSaveManager(self: Manager, SaveManager: any)
 	self.SaveManager = SaveManager
 end
 
-function HUDManager:SetFolder(Folder)
+function HUDManager.SetFolder(self: Manager, Folder: string)
 	self.Folder = Folder
 	self:BuildFolderTree()
 end
 
-function HUDManager:BuildFolderTree()
-	Util.EnsureFolder(self.Folder)
-	Util.EnsureFolder(self.Folder .. "/Profiles")
+function HUDManager.BuildFolderTree(self: Manager)
+	Util.EnsureFolder(`{self.Folder}/Profiles`)
 	Util.EnsureFolder(ProfileStore.GameFolder(self))
 end
 
-function HUDManager:Notify(Content, SubContent)
-	if not self.Library then
-		return
-	end
-
-	self.Library:Notify({
-		Title = "HUD Manager",
-		Content = Content,
-		SubContent = SubContent,
-		Duration = 4,
-	})
+function HUDManager.Notify(self: Manager, Content: string, SubContent: string?)
+	self.Library:Notify({ Title = "HUD Manager", Content = Content, SubContent = SubContent, Duration = 4 })
 end
 
-function HUDManager:Toast(Text)
-	if self.Library then
-		self.Library:Toast(Text, 2)
-	end
+function HUDManager.Toast(self: Manager, Text: string)
+	self.Library:Toast(Text, 2)
 end
 
-function HUDManager:IsOwned(Gui)
+function HUDManager.IsOwned(self: Manager, Gui: GuiObject): boolean
 	local Library = self.Library
 	local Root = if Gui:IsA("ScreenGui") then Gui else Gui:FindFirstAncestorOfClass("ScreenGui")
 
@@ -3689,137 +3420,187 @@ function HUDManager:IsOwned(Gui)
 		return false
 	end
 
-	if Root == Library.GUI or Root == Library.MenuGUI then
-		return true
-	end
-
-	if self.Overlay and (Root == self.Overlay.Layer or Root == self.Overlay.ShieldLayer) then
-		return true
-	end
-
-	return string.sub(Root.Name, 1, 11) == "FluentLayer"
+	return Root == Library.GUI or Root == Library.MenuGUI or string.sub(Root.Name, 1, 11) == "FluentLayer"
 end
 
-function HUDManager:Start()
+function HUDManager.Start(self: Manager): Manager
 	if self.Started then
 		return self
 	end
 
-	assert(self.Library, "HUDManager - Library is not set, call SetLibrary first")
+	assert(self.Library and self.Extension, "HUDManager - call SetLibrary and SetExtension first")
 
-	Kit.Bind(self.Library)
+	self.Extension:Define({
+		Id = Constants.Id,
+		Name = "HUD Manager",
+		Version = Constants.Version,
+		Load = function(Api: any)
+			self:Mount(Api)
+		end,
+		Unload = function()
+			self:Unmount()
+		end,
+	})
 
+	assert(self.Started, "HUDManager - extension failed to load")
+	return self
+end
+
+function HUDManager.Mount(self: Manager, Api: any)
+	self.Api = Api
 	self.Book = RuleBook.new()
 	self.History = History.new(Constants.HistoryLimit)
 	self.Session = NewSession()
-	self.Connections = {}
 	self.Presses = {}
 	self.Started = true
 
 	self:BuildFolderTree()
 
-	self.Overlay = Overlay.new(self)
-	self:ApplyLauncherState()
-	self:IgnoreSaveIndexes(self.Overlay.OptionIds)
+	local Interface = Overlay.new(self, Api)
+	self.Overlay = Interface
 
-	table.insert(
-		self.Connections,
-		UserInputService.InputBegan:Connect(function(Input)
-			self:OnInputBegan(Input)
-		end)
-	)
-
-	table.insert(
-		self.Connections,
-		UserInputService.InputChanged:Connect(function(Input)
-			self:OnInputChanged(Input)
-		end)
-	)
-
-	table.insert(
-		self.Connections,
-		UserInputService.InputEnded:Connect(function(Input)
-			self:OnInputEnded(Input)
-		end)
-	)
-
-	table.insert(
-		self.Connections,
-		PlayerGui.DescendantAdded:Connect(function(Object)
-			if next(self.Book.Rules) ~= nil then
-				task.defer(Scanner.Track, self, Object)
-			end
-		end)
-	)
-
-	table.insert(
-		self.Connections,
-		self.History.Changed:Connect(function()
-			self.Overlay:SetHistoryState(#self.History.Undos > 0, #self.History.Redos > 0)
-		end)
-	)
-
-	pcall(RunService.UnbindFromRenderStep, RunService, Constants.RenderStepName)
-	RunService:BindToRenderStep(Constants.RenderStepName, Constants.RenderPriority, function(Delta)
-		Enforcer.Step(self, Delta)
+	Api:Connect(UserInputService.InputBegan, function(Input: InputObject)
+		self:OnInputBegan(Input)
 	end)
 
-	if not self.UnloadHooked then
-		self.UnloadHooked = true
-		self.Library:OnUnload(function()
-			self:Destroy(false)
-		end)
-	end
+	Api:Connect(UserInputService.InputChanged, function(Input: InputObject)
+		self:OnInputChanged(Input)
+	end)
 
-	task.spawn(function()
-		local Success, Info = pcall(function()
-			return MarketplaceService:GetProductInfo(game.PlaceId)
-		end)
+	Api:Connect(UserInputService.InputEnded, function(Input: InputObject)
+		self:OnInputEnded(Input)
+	end)
 
+	Api:Connect(PlayerGui.DescendantAdded, function(Object: Instance)
+		if not self.Book:IsEmpty() then
+			task.defer(self.Track, self, Object)
+		end
+	end)
+
+	Api:Connect(self.History.Changed, function()
+		Interface:SetHistoryState(#self.History.Undos > 0, #self.History.Redos > 0)
+	end)
+
+	pcall(RunService.UnbindFromRenderStep, RunService, Constants.RenderStep)
+	RunService:BindToRenderStep(Constants.RenderStep, Constants.RenderPriority, function(Delta: number)
+		self:Enforce(Delta)
+	end)
+
+	Api:Track(function()
+		pcall(RunService.UnbindFromRenderStep, RunService, Constants.RenderStep)
+	end, "render-step")
+
+	Api:Spawn(function()
+		local Success, Info = pcall(MarketplaceService.GetProductInfo, MarketplaceService, game.PlaceId)
 		if Success and type(Info) == "table" and Info.Name then
 			self.GameName = Util.SanitizeName(Info.Name)
 		end
 	end)
 
-	return self
+	Api:OnIntroFinished(function()
+		Interface:SetReady(true)
+	end)
+
+	self:IgnoreSaveIndexes({ "HudEditMode", "HudProfileName", "HudProfileList", "HudProfileImport" })
 end
 
-function HUDManager:Destroy(Restore)
-	if not self.Started then
-		return
-	end
-
+function HUDManager.Unmount(self: Manager)
 	self.Started = false
 	self.ScanToken += 1
-
-	if Restore then
-		pcall(function()
-			self.Book:Clear()
-		end)
-	end
-
-	pcall(RunService.UnbindFromRenderStep, RunService, Constants.RenderStepName)
-
-	for _, Link in self.Connections do
-		Link:Disconnect()
-	end
-	table.clear(self.Connections)
-
-	if self.Overlay then
-		self.Overlay:Destroy()
-		self.Overlay = nil
-	end
-
+	self.Overlay = nil :: any
 	self.Session = NewSession()
 	self.Signals.StateChanged:Fire(false)
 end
 
-function HUDManager:OnShieldPressed(Input)
-	if not Util.IsPointer(Input) or not self.Session.EditMode then
+function HUDManager.Destroy(self: Manager, Restore: boolean?)
+	if not self.Started then
 		return
 	end
 
-	if self:IsOverWindow() then
+	if Restore then
+		self.Book:Clear()
+	end
+
+	self.Extension:Disable(Constants.Id)
+end
+
+--// Scanner \\
+
+function HUDManager.Track(self: Manager, Object: Instance)
+	if not Object:IsA("GuiObject") or self.Book:IsEmpty() or self:IsOwned(Object) then
+		return
+	end
+
+	local Key = KeyResolver.Resolve(Object)
+	if self.Book.Rules[Key] then
+		self.Book:Capture(Object, Key)
+		self.Book.Tracked[Object] = Key
+	end
+end
+
+function HUDManager.Rescan(self: Manager)
+	self.ScanToken += 1
+	local Token = self.ScanToken
+
+	task.spawn(function()
+		local Success, Descendants = pcall(PlayerGui.GetDescendants, PlayerGui)
+		if not Success then
+			return
+		end
+
+		for Index, Object in Descendants do
+			if Token ~= self.ScanToken or not self.Started then
+				return
+			end
+
+			self:Track(Object)
+
+			if Index % Constants.ScanBatch == 0 then
+				task.wait()
+			end
+		end
+	end)
+end
+
+function HUDManager.Enforce(self: Manager, Delta: number)
+	local Overlay = self.Overlay
+	if not Overlay then
+		return
+	end
+
+	Overlay:Reflect(self.Session)
+	Overlay:Tick(Delta)
+
+	local Book = self.Book
+	if Book:IsEmpty() then
+		return
+	end
+
+	local Dragged = if self.Session.Drag then self.Session.Drag.Set else nil
+
+	for Object, Key in Book.Tracked do
+		local Rule = Book.Rules[Key]
+
+		if not Object.Parent or not Rule then
+			Book.Tracked[Object] = nil
+			continue
+		end
+
+		if not Rule.IsDeleted then
+			LayoutBaker.Bake(Book, Object.Parent)
+		end
+
+		local Result = Book:Apply(Object, Key, Dragged ~= nil and Dragged[Object] == true, self:IsYielding(Object))
+		if Result == "Adopt" then
+			self:AdoptPosition(Object, Key)
+		end
+	end
+end
+
+--// Input \\
+
+function HUDManager.OnShieldPressed(self: Manager, Input: InputObject)
+	if not Util.IsPointer(Input) or not self.Session.EditMode or self:IsOverWindow() then
 		return
 	end
 
@@ -3832,7 +3613,7 @@ function HUDManager:OnShieldPressed(Input)
 	end
 end
 
-function HUDManager:IsOverWindow()
+function HUDManager.IsOverWindow(self: Manager): boolean
 	local Window = self.Library.Window
 	if not (Window and Window.Root and Window.Root.Visible) then
 		return false
@@ -3841,56 +3622,91 @@ function HUDManager:IsOverWindow()
 	return Util.PointInGui(UserInputService:GetMouseLocation(), Window.Root)
 end
 
-function HUDManager:OnInputBegan(Input)
-	if not Util.IsPointer(Input) or self.Session.EditMode or next(self.Book.Rules) == nil then
+function HUDManager.OnInputBegan(self: Manager, Input: InputObject)
+	if Input.UserInputType == Enum.UserInputType.Keyboard then
+		return self:OnKey(Input)
+	end
+
+	if not Util.IsPointer(Input) or self.Session.EditMode or self.Book:IsEmpty() then
 		return
 	end
 
-	local Objects = {}
+	local Objects: { [GuiObject]: boolean } = {}
 	local Found = false
 
 	for Object, Key in self.Book.Tracked do
 		local Rule = self.Book.Rules[Key]
 
-		if
-			Rule
-			and not Rule.IsDeleted
-			and Object.Parent
-			and Object.Visible
-			and Geometry.ContainsInput(Object, Input.Position)
-		then
+		if Rule and not Rule.IsDeleted and Object.Parent and Object.Visible and Geometry.ContainsInput(Object, Input.Position) then
 			Objects[Object] = true
 			Found = true
 		end
 	end
 
 	if Found then
-		self.Presses[Input] = {
-			Origin = Vector2.new(Input.Position.X, Input.Position.Y),
-			Moved = false,
-			Objects = Objects,
-		}
+		self.Presses[Input] = { Origin = Vector2.new(Input.Position.X, Input.Position.Y), Moved = false, Objects = Objects }
 	end
 end
 
-function HUDManager:TrackPresses(Input)
-	for Key, Press in self.Presses do
-		if not Press.Moved then
-			local Tracking = if Key.UserInputType == Enum.UserInputType.Touch
-				then Input == Key
-				else Input.UserInputType == Enum.UserInputType.MouseMovement
+function HUDManager.OnKey(self: Manager, Input: InputObject)
+	if not (self.Settings.Shortcuts and self.Session.EditMode) or UserInputService:GetFocusedTextBox() then
+		return
+	end
 
-			if Tracking then
-				local Travel = Vector2.new(Input.Position.X, Input.Position.Y) - Press.Origin
-				if Travel.Magnitude >= Constants.TapThreshold then
-					Press.Moved = true
-				end
-			end
+	local Code = Input.KeyCode
+	local Shift = UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+	local Direction = Directions[Code]
+
+	if Direction then
+		local Step = self.Settings.NudgeStep * (if Shift then 5 else 1)
+		self:Nudge(Direction.X * Step, Direction.Y * Step)
+	elseif Code == Enum.KeyCode.Z then
+		if Shift then
+			self:Redo()
+		else
+			self:Undo()
+		end
+	elseif Code == Enum.KeyCode.Y then
+		self:Redo()
+	elseif Code == Enum.KeyCode.Delete or Code == Enum.KeyCode.Backspace then
+		self:DeleteSelected()
+	elseif Code == Enum.KeyCode.Escape then
+		if self:HasSelection() then
+			self:ClearSelection()
+		else
+			self:SetEditMode(false)
 		end
 	end
 end
 
-function HUDManager:IsYielding(Object)
+function HUDManager.OnInputChanged(self: Manager, Input: InputObject)
+	for Key, Press in self.Presses do
+		if not Press.Moved and Util.IsTracking(Key, Input) then
+			local Travel = Vector2.new(Input.Position.X, Input.Position.Y) - Press.Origin
+			Press.Moved = Travel.Magnitude >= Constants.TapThreshold
+		end
+	end
+
+	local Drag = self.Session.Drag
+	if Drag and Util.IsTracking(Drag.Input, Input) then
+		self:UpdateDrag(Input)
+	end
+end
+
+function HUDManager.OnInputEnded(self: Manager, Input: InputObject)
+	for Key in self.Presses do
+		if Util.IsSameInput(Key, Input) then
+			self.Presses[Key] = nil
+		end
+	end
+
+	local Drag = self.Session.Drag
+	if Drag and Util.IsSameInput(Drag.Input, Input) then
+		self:EndDrag()
+	end
+end
+
+function HUDManager.IsYielding(self: Manager, Object: GuiObject): boolean
 	for _, Press in self.Presses do
 		if Press.Moved and Press.Objects[Object] then
 			return true
@@ -3900,7 +3716,7 @@ function HUDManager:IsYielding(Object)
 	return false
 end
 
-function HUDManager:AdoptPosition(Object, Key)
+function HUDManager.AdoptPosition(self: Manager, Object: GuiObject, Key: string)
 	local Rule = self.Book.Rules[Key]
 	if not Rule then
 		return
@@ -3913,12 +3729,12 @@ function HUDManager:AdoptPosition(Object, Key)
 	self.Book.Changed:Fire()
 end
 
-function HUDManager:IsElementLocked(Object)
+function HUDManager.IsElementLocked(self: Manager, Object: GuiObject): boolean
 	if not self.Settings.RespectLocks then
 		return false
 	end
 
-	local Current = Object
+	local Current: Instance? = Object
 
 	while Current and Current ~= PlayerGui do
 		if Current:GetAttribute(Constants.LockAttribute) == true then
@@ -3931,69 +3747,25 @@ function HUDManager:IsElementLocked(Object)
 	return false
 end
 
-function HUDManager:OnInputChanged(Input)
-	self:TrackPresses(Input)
-
-	local Dragging = self.Session.DragInput
-	if not Dragging then
-		return
-	end
-
-	local Tracking = if Dragging.UserInputType == Enum.UserInputType.Touch
-		then Input == Dragging
-		else Input.UserInputType == Enum.UserInputType.MouseMovement
-
-	if Tracking then
-		self:UpdateDrag(Input)
-	end
-end
-
-function HUDManager:OnInputEnded(Input)
-	for Key in self.Presses do
-		local Same = Key == Input
-			or (
-				Key.UserInputType == Enum.UserInputType.MouseButton1
-				and Input.UserInputType == Enum.UserInputType.MouseButton1
-			)
-
-		if Same then
-			self.Presses[Key] = nil
-		end
-	end
-
-	local Dragging = self.Session.DragInput
-	if not Dragging then
-		return
-	end
-
-	local MouseRelease = Dragging.UserInputType == Enum.UserInputType.MouseButton1
-		and Input.UserInputType == Enum.UserInputType.MouseButton1
-
-	if Input == Dragging or MouseRelease then
-		self:EndDrag()
-	end
-end
-
-function HUDManager:PickAt(Position)
-	local Success, Hits = pcall(function()
-		return PlayerGui:GetGuiObjectsAtPosition(Position.X, Position.Y)
-	end)
-
+function HUDManager.PickAt(self: Manager, Position: Vector3): GuiObject?
+	local Success, Hits = pcall(PlayerGui.GetGuiObjectsAtPosition, PlayerGui, Position.X, Position.Y)
 	if not Success or type(Hits) ~= "table" then
 		return nil
 	end
 
-	return Picker.Pick(Hits, Util.GetViewport(), self.Settings.SelectionMode, function(Gui)
+	return Picker.Pick(Hits, Util.GetViewport(), self.Settings.SelectionMode, function(Gui: GuiObject)
 		return not self:IsOwned(Gui)
 	end)
 end
 
-function HUDManager:PrepareElement(Object)
+--// Selection \\
+
+function HUDManager.PrepareElement(self: Manager, Object: GuiObject)
 	self.Book:Capture(Object, KeyResolver.Resolve(Object))
 	LayoutBaker.Bake(self.Book, Object.Parent)
 end
 
-function HUDManager:SelectObject(Object)
+function HUDManager.SelectObject(self: Manager, Object: GuiObject)
 	local Session = self.Session
 
 	Session.Selected = Object
@@ -4009,11 +3781,9 @@ function HUDManager:SelectObject(Object)
 	self.Signals.SelectionChanged:Fire(Object)
 end
 
-function HUDManager:ClearSelection()
-	local Session = self.Session
-
-	Session.Selected = nil
-	Session.Cluster = {}
+function HUDManager.ClearSelection(self: Manager)
+	self.Session.Selected = nil
+	self.Session.Cluster = {}
 
 	if self.Overlay then
 		self.Overlay:SetSelection(nil)
@@ -4022,11 +3792,11 @@ function HUDManager:ClearSelection()
 	self.Signals.SelectionChanged:Fire(nil)
 end
 
-function HUDManager:HasSelection()
+function HUDManager.HasSelection(self: Manager): boolean
 	return self.Session.Selected ~= nil and #self.Session.Cluster > 0
 end
 
-function HUDManager:RequireSelection()
+function HUDManager.RequireSelection(self: Manager): boolean
 	if self:HasSelection() then
 		return true
 	end
@@ -4035,9 +3805,7 @@ function HUDManager:RequireSelection()
 	return false
 end
 
-function HUDManager:SetEditMode(Enabled)
-	Enabled = Enabled == true
-
+function HUDManager.SetEditMode(self: Manager, Enabled: boolean)
 	local Session = self.Session
 	if not self.Started or Session.EditMode == Enabled then
 		return
@@ -4054,36 +3822,42 @@ function HUDManager:SetEditMode(Enabled)
 	self.Signals.StateChanged:Fire(Enabled)
 end
 
-function HUDManager:SetBarLocked(Locked)
-	Locked = Locked == true
-
-	if self.Session.BarLocked == Locked then
-		return
+function HUDManager.SetBarLocked(self: Manager, Locked: boolean)
+	if self.Session.BarLocked ~= Locked then
+		self.Session.BarLocked = Locked
+		self.Overlay:SetBarLocked(Locked)
 	end
-
-	self.Session.BarLocked = Locked
-	self.Overlay:SetBarLocked(Locked)
 end
 
-function HUDManager:SetSetting(Key, Value)
-	if self.Settings[Key] == Value then
+--// Settings \\
+
+function HUDManager.SetSetting(self: Manager, Key: string, Value: any)
+	local Settings = self.Settings :: any
+	if Settings[Key] == Value then
 		return
 	end
 
-	self.Settings[Key] = Value
-	self:SyncSetting(Key)
+	Settings[Key] = Value
+	self:SyncOptions(Key)
 	self.Signals.SettingChanged:Fire(Key, Value)
+
+	local Overlay = self.Overlay
+	if not Overlay then
+		return
+	end
+
+	Overlay:Sync(Key, Value)
 
 	if Key == "ShowLauncher" then
 		self:ApplyLauncherState()
-	elseif Key == "ResizeStep" and self.Overlay then
-		self.Overlay:SetResizeStep(Value)
-	elseif Key == "RespectLocks" and self.Overlay then
-		self.Overlay:SetSelection(self.Session.Selected)
+	elseif Key == "ResizeStep" then
+		Overlay:SetResizeStep(Value)
+	elseif Key == "RespectLocks" then
+		Overlay:SetSelection(self.Session.Selected)
 	end
 end
 
-function HUDManager:BindOption(Key, Idx)
+function HUDManager.BindOption(self: Manager, Key: string, Idx: string)
 	local List = self.Bindings[Key]
 
 	if not List then
@@ -4096,133 +3870,125 @@ function HUDManager:BindOption(Key, Idx)
 	end
 end
 
-function HUDManager:SyncSetting(Key)
-	local List = self.Bindings[Key]
-	if not List then
-		return
-	end
+function HUDManager.SyncOptions(self: Manager, Key: string)
+	local Settings = self.Settings :: any
 
-	local Value = self.Settings[Key]
-
-	for _, Idx in List do
+	for _, Idx in self.Bindings[Key] or {} do
 		local Option = self.Library.Options[Idx]
 
-		if Option and Option.Value ~= Value then
-			pcall(Option.SetValue, Option, Value)
+		if Option and Option.Value ~= Settings[Key] then
+			pcall(Option.SetValue, Option, Settings[Key])
 		end
 	end
 end
 
-function HUDManager:ApplyLauncherState()
-	local Show = self.Settings.ShowLauncher
-
+function HUDManager.ApplyLauncherState(self: Manager)
 	if self.Overlay then
-		self.Overlay:SetLauncherVisible(Show)
+		self.Overlay:ApplyLauncher()
 	end
 
 	if self.ControlSection then
-		self.ControlSection:SetVisible(not Show)
+		self.ControlSection:SetVisible(not self.Settings.ShowLauncher)
 	end
 end
 
-function HUDManager:BeginDrag(Input)
-	local Session = self.Session
+--// Drag \\
 
-	Session.DragInput = Input
-	Session.DragOrigin = Input.Position
-	Session.DragMoved = false
-	Session.DragSet = {}
-	Session.DragStart = {}
-	Session.DragKeys = {}
-	Session.DragBefore = {}
+function HUDManager.BeginDrag(self: Manager, Input: InputObject)
+	self.Session.Drag = {
+		Input = Input,
+		Origin = Input.Position,
+		Moved = false,
+		Set = {},
+		Start = {},
+		Keys = {},
+		Before = {},
+	}
 end
 
-function HUDManager:BeginDragMutation()
-	local Session = self.Session
+function HUDManager.BeginDragMutation(self: Manager, Drag: Drag)
 	local Skipped = 0
 
-	for _, Object in Session.Cluster do
+	for _, Object in self.Session.Cluster do
 		if self:IsElementLocked(Object) then
 			Skipped += 1
-		else
-			local Key = KeyResolver.Resolve(Object)
-			Session.DragBefore[Key] = self.Book:Snapshot(Key)
-
-			local Rule = self.Book:Ensure(Object, Key)
-			Session.DragStart[Object] = Rule.Position
-			Session.DragKeys[Object] = Key
-			Session.DragSet[Object] = true
+			continue
 		end
+
+		local Key = KeyResolver.Resolve(Object)
+		Drag.Before[Key] = self.Book:Snapshot(Key)
+
+		local Rule = self.Book:Ensure(Object, Key)
+		Drag.Start[Object] = Rule.Position
+		Drag.Keys[Object] = Key
+		Drag.Set[Object] = true
 	end
 
-	if Skipped > 0 and next(Session.DragStart) == nil then
+	if Skipped > 0 and next(Drag.Start) == nil then
 		self:Toast("Element is locked, unlock it first")
 	end
 end
 
-function HUDManager:UpdateDrag(Input)
-	local Session = self.Session
-	local Raw = Input.Position - Session.DragOrigin
+function HUDManager.UpdateDrag(self: Manager, Input: InputObject)
+	local Drag = self.Session.Drag
+	if not Drag then
+		return
+	end
+
+	local Raw = Input.Position - Drag.Origin
 	local Delta = Vector2.new(Raw.X, Raw.Y)
 
-	if not Session.DragMoved then
+	if not Drag.Moved then
 		if Delta.Magnitude < Constants.DragSlop then
 			return
 		end
 
-		self:BeginDragMutation()
-		Session.DragMoved = true
+		self:BeginDragMutation(Drag)
+		Drag.Moved = true
 	end
 
 	local Settings = self.Settings
 	local X = if Settings.Axis == "Vertical" then 0 else Util.Snap(Delta.X, Settings.SnapSize)
 	local Y = if Settings.Axis == "Horizontal" then 0 else Util.Snap(Delta.Y, Settings.SnapSize)
 
-	for Object, Start in Session.DragStart do
-		local Rule = self.Book.Rules[Session.DragKeys[Object]]
+	for Object, Start in Drag.Start do
+		local Rule = self.Book.Rules[Drag.Keys[Object]]
 		if Rule then
-			Rule.Position = UDim2.new(Start.X.Scale, Start.X.Offset + X, Start.Y.Scale, Start.Y.Offset + Y)
+			Rule.Position = Util.Shift(Start, X, Y)
 			Object.Position = Rule.Position
 		end
 	end
 end
 
-function HUDManager:EndDrag()
-	local Session = self.Session
-	if not Session.DragInput then
+function HUDManager.EndDrag(self: Manager)
+	local Drag = self.Session.Drag
+	if not Drag then
 		return
 	end
 
-	if Session.DragMoved then
-		local Changes = {}
+	self.Session.Drag = nil
 
-		for _, Key in Session.DragKeys do
-			table.insert(Changes, {
-				Key = Key,
-				Before = Session.DragBefore[Key],
-				After = self.Book:Snapshot(Key),
-			})
-		end
-
-		self.History:Push("Move", Changes)
-		self.Book.Changed:Fire()
+	if not Drag.Moved then
+		return
 	end
 
-	Session.DragInput = nil
-	Session.DragMoved = false
-	Session.DragSet = {}
-	Session.DragStart = {}
-	Session.DragKeys = {}
-	Session.DragBefore = {}
+	local Changes: { Change } = {}
+
+	for _, Key in Drag.Keys do
+		table.insert(Changes, { Key = Key, Before = Drag.Before[Key], After = self.Book:Snapshot(Key) })
+	end
+
+	self.History:Push("Move", Changes)
+	self.Book.Changed:Fire()
 end
 
-function HUDManager:IsDragging()
-	local Input = self.Session.DragInput
-	if not Input then
+function HUDManager.IsDragging(self: Manager): boolean
+	local Drag = self.Session.Drag
+	if not Drag then
 		return false
 	end
 
-	local State = Input.UserInputState
+	local State = Drag.Input.UserInputState
 	if State == Enum.UserInputState.End or State == Enum.UserInputState.Cancel then
 		self:EndDrag()
 		return false
@@ -4231,30 +3997,33 @@ function HUDManager:IsDragging()
 	return true
 end
 
-function HUDManager:Mutate(Label, Mutator, Merge, IgnoreLock)
+--// Mutation \\
+
+function HUDManager.Mutate(self: Manager, Label: string, Mutator: (Rule: Rule, Object: GuiObject) -> boolean?, Merge: boolean?, IgnoreLock: boolean?): boolean
 	if not self:RequireSelection() or self:IsDragging() then
 		return false
 	end
 
-	local Changes = {}
+	local Changes: { Change } = {}
 	local Skipped = 0
 
 	for _, Object in self.Session.Cluster do
 		if not IgnoreLock and self:IsElementLocked(Object) then
 			Skipped += 1
-		else
-			local Key = KeyResolver.Resolve(Object)
-			local Before = self.Book:Snapshot(Key)
-			local Rule = self.Book:Ensure(Object, Key)
+			continue
+		end
 
-			if Mutator(Rule, Object) == false then
-				if not Before then
-					self.Book:Release(Key)
-				end
-			else
-				self.Book:Apply(Object, Key, false)
-				table.insert(Changes, { Key = Key, Before = Before, After = self.Book:Snapshot(Key) })
+		local Key = KeyResolver.Resolve(Object)
+		local Before = self.Book:Snapshot(Key)
+		local Rule = self.Book:Ensure(Object, Key)
+
+		if Mutator(Rule, Object) == false then
+			if not Before then
+				self.Book:Release(Key)
 			end
+		else
+			self.Book:Apply(Object, Key, false)
+			table.insert(Changes, { Key = Key, Before = Before, After = self.Book:Snapshot(Key) })
 		end
 	end
 
@@ -4272,43 +4041,51 @@ function HUDManager:Mutate(Label, Mutator, Merge, IgnoreLock)
 	return true
 end
 
-function HUDManager:Nudge(DeltaX, DeltaY)
+function HUDManager.Nudge(self: Manager, DeltaX: number, DeltaY: number): boolean
 	return self:Mutate("Nudge", function(Rule)
-		local Position = Rule.Position
-		Rule.Position = UDim2.new(
-			Position.X.Scale,
-			Position.X.Offset + DeltaX,
-			Position.Y.Scale,
-			Position.Y.Offset + DeltaY
-		)
+		Rule.Position = Util.Shift(Rule.Position, DeltaX, DeltaY)
+		return true
 	end, true)
 end
 
-function HUDManager:Resize(Delta)
+function HUDManager.Resize(self: Manager, Delta: number): boolean
 	return self:Mutate("Resize", function(Rule, Object)
 		local Current = Object.AbsoluteSize
 		if Current.X + Delta < Constants.MinElementSize or Current.Y + Delta < Constants.MinElementSize then
 			return false
 		end
 
-		local Size = Rule.Size
-		Rule.Size = UDim2.new(Size.X.Scale, Size.X.Offset + Delta, Size.Y.Scale, Size.Y.Offset + Delta)
+		Rule.Size = Util.Shift(Rule.Size, Delta, Delta)
 		Rule.SizeModified = true
 
 		local Anchor = Object.AnchorPoint
-		local Position = Rule.Position
-		Rule.Position = UDim2.new(
-			Position.X.Scale,
-			Position.X.Offset + math.round((Anchor.X - 0.5) * Delta),
-			Position.Y.Scale,
-			Position.Y.Offset + math.round((Anchor.Y - 0.5) * Delta)
-		)
+		Rule.Position = Util.Shift(Rule.Position, math.round((Anchor.X - 0.5) * Delta), math.round((Anchor.Y - 0.5) * Delta))
 
 		return true
 	end, true)
 end
 
-function HUDManager:DeleteSelected()
+function HUDManager.Align(self: Manager, Axis: "X" | "Y"): boolean
+	local Primary = self.Session.Selected
+	if not Primary then
+		return self:RequireSelection()
+	end
+
+	local Center = Geometry.ScreenPosition(Primary) + Primary.AbsoluteSize / 2
+	local Target = Util.GetViewport() / 2
+	local Offset = math.round(if Axis == "X" then Target.X - Center.X else Target.Y - Center.Y)
+
+	if Offset == 0 then
+		return false
+	end
+
+	return self:Mutate("Align", function(Rule)
+		Rule.Position = if Axis == "X" then Util.Shift(Rule.Position, Offset, 0) else Util.Shift(Rule.Position, 0, Offset)
+		return true
+	end)
+end
+
+function HUDManager.DeleteSelected(self: Manager): boolean
 	local Done = self:Mutate("Hide", function(Rule)
 		Rule.IsDeleted = true
 		return true
@@ -4321,12 +4098,12 @@ function HUDManager:DeleteSelected()
 	return Done
 end
 
-function HUDManager:ResetSelected()
+function HUDManager.ResetSelected(self: Manager): boolean
 	if not self:RequireSelection() then
 		return false
 	end
 
-	local Changes = {}
+	local Changes: { Change } = {}
 
 	for _, Object in self.Session.Cluster do
 		local Key = KeyResolver.Resolve(Object)
@@ -4349,7 +4126,7 @@ function HUDManager:ResetSelected()
 	return true
 end
 
-function HUDManager:RestoreKey(Key)
+function HUDManager.RestoreKey(self: Manager, Key: string): boolean
 	local Before = self.Book:Snapshot(Key)
 	if not Before then
 		return false
@@ -4361,12 +4138,12 @@ function HUDManager:RestoreKey(Key)
 	return true
 end
 
-function HUDManager:FocusObject(Object)
+function HUDManager.FocusObject(self: Manager, Object: GuiObject)
 	self:SetEditMode(true)
 	self:SelectObject(Object)
 end
 
-function HUDManager:FocusKey(Key)
+function HUDManager.FocusKey(self: Manager, Key: string): boolean
 	local Object = self.Book:FindObject(Key)
 
 	if Object and Object.Visible then
@@ -4378,9 +4155,9 @@ function HUDManager:FocusKey(Key)
 	return false
 end
 
-function HUDManager:ApplyChanges(Changes, Field)
+function HUDManager.ApplyChanges(self: Manager, Changes: { Change }, Field: "Before" | "After")
 	for _, Change in Changes do
-		local State = Change[Field]
+		local State = if Field == "Before" then Change.Before else Change.After
 
 		if State == nil then
 			self.Book:Release(Change.Key)
@@ -4389,34 +4166,34 @@ function HUDManager:ApplyChanges(Changes, Field)
 		end
 	end
 
-	Scanner.Rescan(self)
+	self:Rescan()
 	self.Book.Changed:Fire()
 end
 
-function HUDManager:Undo()
-	local Entry = self.History:PopUndo()
-	if not Entry then
+function HUDManager.Undo(self: Manager): boolean
+	local Item = self.History:PopUndo()
+	if not Item then
 		self:Toast("Nothing to undo")
 		return false
 	end
 
-	self:ApplyChanges(Entry.Changes, "Before")
+	self:ApplyChanges(Item.Changes, "Before")
 	return true
 end
 
-function HUDManager:Redo()
-	local Entry = self.History:PopRedo()
-	if not Entry then
+function HUDManager.Redo(self: Manager): boolean
+	local Item = self.History:PopRedo()
+	if not Item then
 		self:Toast("Nothing to redo")
 		return false
 	end
 
-	self:ApplyChanges(Entry.Changes, "After")
+	self:ApplyChanges(Item.Changes, "After")
 	return true
 end
 
-function HUDManager:ReplaceRules(Incoming, Merge, Label)
-	local Keys = {}
+function HUDManager.ReplaceRules(self: Manager, Incoming: { [string]: Rule }, Merge: boolean?, Label: string)
+	local Keys: { [string]: boolean } = {}
 
 	for Key in Incoming do
 		Keys[Key] = true
@@ -4428,13 +4205,10 @@ function HUDManager:ReplaceRules(Incoming, Merge, Label)
 		end
 	end
 
-	local Changes = {}
+	local Changes: { Change } = {}
 	for Key in Keys do
-		table.insert(Changes, {
-			Key = Key,
-			Before = self.Book:Snapshot(Key),
-			After = if Incoming[Key] then table.clone(Incoming[Key]) else nil,
-		})
+		local Next = Incoming[Key]
+		table.insert(Changes, { Key = Key, Before = self.Book:Snapshot(Key), After = if Next then table.clone(Next) else nil })
 	end
 
 	self.History:Push(Label, Changes)
@@ -4442,11 +4216,13 @@ function HUDManager:ReplaceRules(Incoming, Merge, Label)
 	self:ClearSelection()
 end
 
-function HUDManager:ResetAll()
+function HUDManager.ResetAll(self: Manager)
 	self:ReplaceRules({}, false, "Reset all")
 end
 
-function HUDManager:OpenSettings()
+--// Window \\
+
+function HUDManager.OpenSettings(self: Manager)
 	local Window = self.Library.Window
 	if not Window then
 		return
@@ -4461,14 +4237,35 @@ function HUDManager:OpenSettings()
 	end
 end
 
-function HUDManager:HideWindow()
+function HUDManager.HideWindow(self: Manager)
 	local Window = self.Library.Window
 	if Window and not Window.Minimized then
 		Window:Minimize()
 	end
 end
 
-function HUDManager:QuickSave()
+function HUDManager.Confirm(self: Manager, Title: string, Content: string, Label: string, Action: () -> ())
+	self.Library.Window:Dialog({
+		Title = Title,
+		Content = Content,
+		Buttons = {
+			{ Title = Label, Variant = "Danger", Callback = Action },
+			{ Title = "Cancel" },
+		},
+	})
+end
+
+function HUDManager.IgnoreSaveIndexes(self: Manager, List: { string })
+	local Manager = self.SaveManager or (self.Extension and self.Extension.SaveManager)
+
+	if Manager then
+		pcall(Manager.SetIgnoreIndexes, Manager, List)
+	end
+end
+
+--// Profiles \\
+
+function HUDManager.QuickSave(self: Manager)
 	local Name = self.ActiveProfile or "Quick"
 	local Success, Problem = ProfileStore.Save(self, Name)
 
@@ -4476,26 +4273,14 @@ function HUDManager:QuickSave()
 		return self:Notify("Failed to save", tostring(Problem))
 	end
 
-	self:Notify("Profile saved", string.format("%q", Name))
+	self:Notify("Profile saved", Util.Quote(Name))
 end
 
-function HUDManager:SaveProfile(Name)
-	return ProfileStore.Save(self, Name)
-end
-
-function HUDManager:LoadProfile(Name)
+function HUDManager.LoadProfile(self: Manager, Name: string?): (boolean, string?)
 	return ProfileStore.Load(self, Name, self.Settings.LoadMode == "Merge")
 end
 
-function HUDManager:DeleteProfile(Name)
-	return ProfileStore.Delete(self, Name)
-end
-
-function HUDManager:ListProfiles()
-	return ProfileStore.List(self)
-end
-
-function HUDManager:LoadAutoloadConfig()
+function HUDManager.LoadAutoloadConfig(self: Manager)
 	self:Start()
 
 	local Name = ProfileStore.GetAutoload(self)
@@ -4508,43 +4293,33 @@ function HUDManager:LoadAutoloadConfig()
 		return self:Notify("Autoload failed", tostring(Problem))
 	end
 
-	self:Notify("HUD profile auto loaded", string.format("%q", Name))
+	self:Notify("HUD profile auto loaded", Util.Quote(Name))
 end
 
-function HUDManager:IgnoreSaveIndexes(List)
-	local Manager = self.SaveManager or (self.Extension and self.Extension.SaveManager)
+--// Sections \\
 
-	if Manager then
-		pcall(function()
-			Manager:SetIgnoreIndexes(List)
-		end)
+function HUDManager.AddSetting(self: Manager, Section: any, Method: string, Key: string, Config: { [string]: any }): any
+	local Idx = `Hud{Key}`
+
+	Config.Default = (self.Settings :: any)[Key]
+	Config.Callback = function(Value: any)
+		self:SetSetting(Key, Value)
 	end
+
+	local Option = Section[Method](Section, Idx, Config)
+	self:BindOption(Key, Idx)
+	return Option
 end
 
-function HUDManager:Confirm(Title, Content, Label, Action)
-	self.Library.Window:Dialog({
-		Title = Title,
-		Content = Content,
-		Buttons = {
-			{ Title = Label, Variant = "Danger", Callback = Action },
-			{ Title = "Cancel" },
-		},
-	})
-end
-
-function HUDManager:BuildControlSection(Tab)
-	self:Start()
-
-	local Library = self.Library
+function HUDManager.BuildControlSection(self: Manager, Tab: any)
 	local Section = Tab:AddSection("Controls", { Icon = "lucide:mouse-pointer-2" })
 	self.ControlSection = Section
 
 	Section:AddToggle("HudEditMode", {
 		Title = "Edit mode",
-		Description = "Select, drag and resize elements on screen, the window hides while editing",
 		Icon = "lucide:pencil",
 		Default = self.Session.EditMode,
-		Callback = function(Value)
+		Callback = function(Value: boolean)
 			self:SetEditMode(Value)
 			if Value then
 				self:HideWindow()
@@ -4552,175 +4327,85 @@ function HUDManager:BuildControlSection(Tab)
 		end,
 	})
 
-	Section:AddButton({
-		Title = "Undo",
-		Description = "Revert the last change",
-		Variant = "Tonal",
-		ButtonText = "Undo",
-		ButtonIcon = "lucide:undo-2",
-		Callback = function()
-			self:Undo()
-		end,
-	})
+	local function AddAction(Title: string, Icon: string, Variant: string, Callback: () -> ())
+		Section:AddButton({ Title = Title, Variant = Variant, ButtonText = Title, ButtonIcon = Icon, Callback = Callback })
+	end
 
-	Section:AddButton({
-		Title = "Redo",
-		Description = "Apply the change that was reverted",
-		Variant = "Tonal",
-		ButtonText = "Redo",
-		ButtonIcon = "lucide:redo-2",
-		Callback = function()
-			self:Redo()
-		end,
-	})
+	AddAction("Undo", "lucide:undo-2", "Tonal", function()
+		self:Undo()
+	end)
 
-	Section:AddButton({
-		Title = "Quick save",
-		Description = "Save the layout to the active profile",
-		Variant = "Primary",
-		ButtonText = "Save",
-		ButtonIcon = "lucide:save",
-		Callback = function()
-			self:QuickSave()
-		end,
-	})
+	AddAction("Redo", "lucide:redo-2", "Tonal", function()
+		self:Redo()
+	end)
 
-	Section:AddButton({
-		Title = "Advanced panel",
-		Description = "Nudge, resize and review modified elements",
-		Variant = "Outline",
-		ButtonText = "Toggle",
-		ButtonIcon = "lucide:sliders-horizontal",
-		Callback = function()
-			self.Overlay:ToggleAdvanced()
-		end,
-	})
+	AddAction("Save", "lucide:save", "Primary", function()
+		self:QuickSave()
+	end)
 
-	table.insert(
-		self.Connections,
-		self.Signals.StateChanged:Connect(function(Enabled)
-			local Option = Library.Options.HudEditMode
-			if Option and Option.Value ~= Enabled then
-				pcall(Option.SetValue, Option, Enabled)
-			end
-		end)
-	)
+	AddAction("Advanced", "lucide:sliders-horizontal", "Outline", function()
+		self.Overlay:ToggleAdvanced()
+	end)
+
+	self.Api:Connect(self.Signals.StateChanged, function(Enabled: boolean)
+		local Option = self.Library.Options.HudEditMode
+		if Option and Option.Value ~= Enabled then
+			pcall(Option.SetValue, Option, Enabled)
+		end
+	end)
 
 	self:ApplyLauncherState()
 end
 
-function HUDManager:BuildConfigSection(Tab)
-	self:Start()
-
-	local Settings = self.Settings
+function HUDManager.BuildConfigSection(self: Manager, Tab: any)
 	local Section = Tab:AddSection("Configuration", { Icon = "lucide:sliders-horizontal" })
 
-	Section:AddToggle("HudShowLauncher", {
-		Title = "Floating launcher",
-		Description = "Draggable button that opens the dock, the Controls section only shows while it is off",
-		Icon = "lucide:circle-dot",
-		Default = Settings.ShowLauncher,
-		Callback = function(Value)
-			self:SetSetting("ShowLauncher", Value)
-		end,
+	self:AddSetting(Section, "AddToggle", "ShowLauncher", { Title = "Launcher", Icon = "lucide:circle-dot" })
+	self:AddSetting(Section, "AddToggle", "GroupCluster", { Title = "Group linked elements", Icon = "lucide:link" })
+	self:AddSetting(Section, "AddToggle", "RespectLocks", { Title = "Respect locks", Icon = "lucide:lock" })
+	self:AddSetting(Section, "AddToggle", "Shortcuts", {
+		Title = "Shortcuts",
+		Description = "Arrows, Z, Y, Delete and Esc while editing",
+		Icon = "lucide:keyboard",
 	})
-	self:BindOption("ShowLauncher", "HudShowLauncher")
-
-	Section:AddToggle("HudGroupCluster", {
-		Title = "Move linked elements together",
-		Description = "Elements that share the same center are edited as one",
-		Icon = "lucide:link",
-		Default = Settings.GroupCluster,
-		Callback = function(Value)
-			self:SetSetting("GroupCluster", Value)
-		end,
-	})
-	self:BindOption("GroupCluster", "HudGroupCluster")
-
-	Section:AddToggle("HudRespectLocks", {
-		Title = "Respect element locks",
-		Description = "Elements that lock themselves with the Locked attribute cannot be moved or resized here",
-		Icon = "lucide:lock",
-		Default = Settings.RespectLocks,
-		Callback = function(Value)
-			self:SetSetting("RespectLocks", Value)
-		end,
-	})
-	self:BindOption("RespectLocks", "HudRespectLocks")
-
-	Section:AddSegmented("HudSelectionMode", {
-		Title = "Selection mode",
-		Description = "Smart climbs to the whole button, Exact picks the layer you tapped",
-		Options = { "Smart", "Exact" },
-		Default = Settings.SelectionMode,
-		Callback = function(Value)
-			self:SetSetting("SelectionMode", Value)
-		end,
-	})
-	self:BindOption("SelectionMode", "HudSelectionMode")
-
-	Section:AddSegmented("HudAxis", {
-		Title = "Drag axis",
-		Description = "Restrict dragging to a single direction",
-		Options = { "Free", "Horizontal", "Vertical" },
-		Default = Settings.Axis,
-		Callback = function(Value)
-			self:SetSetting("Axis", Value)
-		end,
-	})
-	self:BindOption("Axis", "HudAxis")
-
-	Section:AddSlider("HudResizeStep", {
+	self:AddSetting(Section, "AddSegmented", "SelectionMode", { Title = "Selection", Options = { "Smart", "Exact" } })
+	self:AddSetting(Section, "AddSegmented", "Axis", { Title = "Drag axis", Options = { "Free", "Horizontal", "Vertical" } })
+	self:AddSetting(Section, "AddSegmented", "NudgeStep", { Title = "Nudge step", Options = Constants.NudgeSteps })
+	self:AddSetting(Section, "AddSlider", "ResizeStep", {
 		Title = "Resize step",
-		Description = "Pixels added or removed by the size buttons",
 		Icon = "lucide:maximize-2",
 		Min = 1,
 		Max = 50,
-		Default = Settings.ResizeStep,
 		Rounding = 0,
 		Suffix = " px",
-		Callback = function(Value)
-			self:SetSetting("ResizeStep", Value)
-		end,
 	})
-	self:BindOption("ResizeStep", "HudResizeStep")
-
-	Section:AddSlider("HudSnapSize", {
-		Title = "Snap to grid",
-		Description = "Round drag distance to this many pixels, 0 turns it off",
+	self:AddSetting(Section, "AddSlider", "SnapSize", {
+		Title = "Snap size",
+		Description = "0 turns snapping off",
 		Icon = "lucide:grid",
 		Min = 0,
 		Max = 50,
-		Default = Settings.SnapSize,
 		Rounding = 0,
 		Suffix = " px",
-		Callback = function(Value)
-			self:SetSetting("SnapSize", Value)
-		end,
 	})
-	self:BindOption("SnapSize", "HudSnapSize")
 end
 
-function HUDManager:BuildProfileSection(Tab)
-	self:Start()
-
+function HUDManager.BuildProfileSection(self: Manager, Tab: any)
 	local Library = self.Library
-	local Section = Tab:AddSection("Saving", { Icon = "lucide:save" })
-	local AutoloadButton
+	local Section = Tab:AddSection("Profiles", { Icon = "lucide:save" })
+	local AutoloadButton: any
 
 	Section:AddSegmented("HudLoadMode", {
-		Title = "Profile loading",
-		Description = "Replace restores everything first, Merge keeps current changes",
+		Title = "Load mode",
 		Options = { "Replace", "Merge" },
 		Default = self.Settings.LoadMode,
-		Callback = function(Value)
+		Callback = function(Value: LoadMode)
 			self.Settings.LoadMode = Value
 		end,
 	})
 
 	Section:AddInput("HudProfileName", {
-		Title = "Profile name",
-		Description = "Name for a new profile",
+		Title = "Name",
 		Variant = "Field",
 		Icon = "lucide:pencil",
 		Placeholder = "My HUD",
@@ -4728,20 +4413,19 @@ function HUDManager:BuildProfileSection(Tab)
 	})
 
 	Section:AddDropdown("HudProfileList", {
-		Title = "Saved profiles",
-		Description = "Profiles stored for this game",
+		Title = "Profiles",
 		Icon = "lucide:folder-open",
 		Variant = "Compact",
 		Values = ProfileStore.List(self),
 		AllowNull = true,
 	})
 
-	local function Selected()
+	local function Selected(): string?
 		return Library.Options.HudProfileList.Value
 	end
 
 	local function DescribeAutoload()
-		AutoloadButton:SetDesc("Current autoload profile: " .. (ProfileStore.GetAutoload(self) or "none"))
+		AutoloadButton:SetDesc(`Autoload: {ProfileStore.GetAutoload(self) or "none"}`)
 	end
 
 	local function Refresh()
@@ -4750,21 +4434,34 @@ function HUDManager:BuildProfileSection(Tab)
 		DescribeAutoload()
 	end
 
-	local function Create(Name)
+	local function RequireProfile(Failure: string, Action: (Name: string) -> ())
+		local Name = Selected()
+
+		if Util.IsBlank(Name) then
+			return self:Notify(Failure, "no profile selected")
+		end
+
+		Action(Name :: string)
+	end
+
+	local function Create(Name: string)
 		local Success, Problem = ProfileStore.Save(self, Name)
 		if not Success then
 			return self:Notify("Failed to save", tostring(Problem))
 		end
 
-		self:Notify("Profile saved", string.format("%q", Util.SanitizeName(Name)))
+		self:Notify("Profile saved", Util.Quote(Util.SanitizeName(Name)))
 		Refresh()
 	end
 
-	Section:AddButton({
-		Title = "Create profile",
-		Description = "Save the current layout as a new profile",
+	local function AddButton(Container: any, Config: { [string]: any }): any
+		Config.ButtonText = Config.ButtonText or Config.Title
+		return Container:AddButton(Config)
+	end
+
+	AddButton(Section, {
+		Title = "Create",
 		Variant = "Primary",
-		ButtonText = "Create",
 		ButtonIcon = "lucide:save",
 		Callback = function()
 			local Name = Util.SanitizeName(Library.Options.HudProfileName.Value)
@@ -4774,25 +4471,18 @@ function HUDManager:BuildProfileSection(Tab)
 			end
 
 			if Util.HasFileSystem() and isfile(ProfileStore.Path(self, Name)) then
-				return self:Confirm(
-					"Overwrite profile",
-					string.format("Profile %q already exists. Do you want to overwrite it?", Name),
-					"Overwrite",
-					function()
-						Create(Name)
-					end
-				)
+				return self:Confirm("Overwrite profile", `{Util.Quote(Name)} already exists. Overwrite it?`, "Overwrite", function()
+					Create(Name)
+				end)
 			end
 
 			Create(Name)
 		end,
 	})
 
-	Section:AddButton({
-		Title = "Load profile",
-		Description = "Apply the selected profile",
+	AddButton(Section, {
+		Title = "Load",
 		Variant = "Tonal",
-		ButtonText = "Load",
 		ButtonIcon = "lucide:download",
 		Callback = function()
 			local Name = Selected()
@@ -4802,76 +4492,48 @@ function HUDManager:BuildProfileSection(Tab)
 				return self:Notify("Failed to load", tostring(Problem))
 			end
 
-			self:Notify("Profile loaded", string.format("%q", Name))
+			self:Notify("Profile loaded", Util.Quote(Name :: string))
 		end,
 	})
 
-	Section:AddButton({
-		Title = "Overwrite profile",
-		Description = "Replace the selected profile with the current layout",
+	AddButton(Section, {
+		Title = "Overwrite",
 		Variant = "Outline",
-		ButtonText = "Overwrite",
 		ButtonIcon = "lucide:refresh-cw",
 		Callback = function()
-			local Name = Selected()
-
-			if Util.IsBlank(Name) then
-				return self:Notify("Failed to overwrite", "no profile selected")
-			end
-
-			self:Confirm(
-				"Overwrite profile",
-				string.format("Are you sure you want to overwrite %q with the current layout?", Name),
-				"Overwrite",
-				function()
+			RequireProfile("Failed to overwrite", function(Name)
+				self:Confirm("Overwrite profile", `Replace {Util.Quote(Name)} with the current layout?`, "Overwrite", function()
 					local Success, Problem = ProfileStore.Save(self, Name)
 					if not Success then
 						return self:Notify("Failed to overwrite", tostring(Problem))
 					end
 
-					self:Notify("Profile overwritten", string.format("%q", Name))
-				end
-			)
+					self:Notify("Profile overwritten", Util.Quote(Name))
+				end)
+			end)
 		end,
 	})
 
-	Section:AddButton({
-		Title = "Delete profile",
-		Description = "Delete the selected profile",
+	AddButton(Section, {
+		Title = "Delete",
 		Variant = "Danger",
-		ButtonText = "Delete",
 		ButtonIcon = "lucide:trash",
 		Callback = function()
-			local Name = Selected()
-
-			if Util.IsBlank(Name) then
-				return self:Notify("Failed to delete", "no profile selected")
-			end
-
-			self:Confirm(
-				"Delete profile",
-				string.format("Are you sure you want to delete %q? This cannot be undone.", Name),
-				"Delete",
-				function()
+			RequireProfile("Failed to delete", function(Name)
+				self:Confirm("Delete profile", `Delete {Util.Quote(Name)}? This cannot be undone.`, "Delete", function()
 					ProfileStore.Delete(self, Name)
-					self:Notify("Profile deleted", string.format("%q", Name))
+					self:Notify("Profile deleted", Util.Quote(Name))
 					Refresh()
-				end
-			)
+				end)
+			end)
 		end,
 	})
 
-	Section:AddButton({
-		Title = "Refresh list",
-		Variant = "Ghost",
-		ButtonText = "Refresh",
-		ButtonIcon = "lucide:rotate-cw",
-		Callback = Refresh,
-	})
+	AddButton(Section, { Title = "Refresh", Variant = "Ghost", ButtonIcon = "lucide:rotate-cw", Callback = Refresh })
 
-	AutoloadButton = Section:AddButton({
-		Title = "Set as autoload",
-		Description = "Current autoload profile: none",
+	AutoloadButton = AddButton(Section, {
+		Title = "Autoload",
+		Description = "Autoload: none",
 		Variant = "Accent",
 		ButtonText = "Toggle",
 		ButtonIcon = "lucide:rocket",
@@ -4894,70 +4556,57 @@ function HUDManager:BuildProfileSection(Tab)
 			end
 
 			DescribeAutoload()
-			self:Notify("Autoload set", string.format("%q", Name))
+			self:Notify("Autoload set", Util.Quote(Name :: string))
 		end,
 	})
 
-	local Share = Tab:AddSection("Share and migrate", { Icon = "lucide:share" })
+	local Share = Tab:AddSection("Share", { Icon = "lucide:share" })
 
-	Share:AddButton({
-		Title = "Copy profile",
-		Description = "Copy the selected profile as JSON to your clipboard",
+	AddButton(Share, {
+		Title = "Copy",
 		Variant = "Tonal",
-		ButtonText = "Copy",
 		ButtonIcon = "lucide:copy",
 		Callback = function()
-			local Name = Selected()
+			RequireProfile("Failed to copy", function(Name)
+				local Success, Problem = ProfileStore.Export(self, Name)
+				if not Success then
+					return self:Notify("Failed to copy", tostring(Problem))
+				end
 
-			if Util.IsBlank(Name) then
-				return self:Notify("Failed to copy", "no profile selected")
-			end
-
-			local Success, Problem = ProfileStore.Export(self, Name)
-			if not Success then
-				return self:Notify("Failed to copy", tostring(Problem))
-			end
-
-			self:Notify("Profile copied", string.format("%q", Name))
+				self:Notify("Profile copied", Util.Quote(Name))
+			end)
 		end,
 	})
 
 	Share:AddInput("HudProfileImport", {
-		Title = "Profile JSON",
-		Description = "Paste a copied profile, then press Import",
+		Title = "JSON",
 		Variant = "Field",
 		Icon = "lucide:clipboard",
-		Placeholder = "Paste JSON",
+		Placeholder = "Paste a copied profile",
 		Finished = false,
 	})
 
-	Share:AddButton({
-		Title = "Import profile",
-		Description = "Save the pasted JSON under the profile name above",
+	AddButton(Share, {
+		Title = "Import",
+		Description = "Saved under the profile name above",
 		Variant = "Primary",
-		ButtonText = "Import",
 		ButtonIcon = "lucide:file-input",
 		Callback = function()
-			local Success, Result = ProfileStore.ImportText(
-				self,
-				Library.Options.HudProfileName.Value,
-				Library.Options.HudProfileImport.Value
-			)
+			local Success, Result = ProfileStore.ImportText(self, Library.Options.HudProfileName.Value, Library.Options.HudProfileImport.Value)
 
 			if not Success then
 				return self:Notify("Failed to import", tostring(Result))
 			end
 
-			self:Notify("Profile imported", Result .. " rules")
+			self:Notify("Profile imported", `{Result} rules`)
 			Refresh()
 		end,
 	})
 
-	Share:AddButton({
-		Title = "Import legacy configs",
-		Description = "Bring in saves made by the old Perfect UI Manager",
+	AddButton(Share, {
+		Title = "Import legacy",
+		Description = "Saves from the old Perfect UI Manager",
 		Variant = "Outline",
-		ButtonText = "Import",
 		ButtonIcon = "lucide:history",
 		Callback = function()
 			local Count = ProfileStore.ImportLegacy(self)
@@ -4966,20 +4615,48 @@ function HUDManager:BuildProfileSection(Tab)
 				return self:Notify("Nothing imported", "no new legacy saves for this game")
 			end
 
-			self:Notify("Legacy configs imported", Count .. " profiles")
+			self:Notify("Legacy configs imported", `{Count} profiles`)
 			Refresh()
 		end,
 	})
 
 	DescribeAutoload()
-	self:IgnoreSaveIndexes({ "HudEditMode", "HudProfileName", "HudProfileList", "HudProfileImport" })
 end
 
-function HUDManager:BuildSection(Tab)
+function HUDManager.BuildSection(self: Manager, Tab: any)
+	self:Start()
 	self.Tab = Tab
 	self:BuildControlSection(Tab)
 	self:BuildConfigSection(Tab)
 	self:BuildProfileSection(Tab)
 end
 
-return HUDManager
+local Singleton: Manager = setmetatable({
+	Version = Constants.Version,
+	Folder = "HUDManager",
+	Library = nil,
+	Extension = nil,
+	SaveManager = nil,
+	Api = nil,
+	Overlay = nil :: any,
+	Book = nil :: any,
+	History = nil :: any,
+	Tab = nil,
+	ControlSection = nil,
+	Started = false,
+	GameId = tostring(if game.GameId > 0 then game.GameId else game.PlaceId),
+	GameName = "UnknownGame",
+	ActiveProfile = nil,
+	ScanToken = 0,
+	Settings = NewSettings(),
+	Session = NewSession(),
+	Bindings = {},
+	Presses = {},
+	Signals = {
+		StateChanged = Signal.new(),
+		SelectionChanged = Signal.new(),
+		SettingChanged = Signal.new(),
+	},
+} :: ManagerFields, HUDManager)
+
+return Singleton
