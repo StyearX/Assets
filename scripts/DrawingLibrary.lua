@@ -4,7 +4,8 @@ end)
 local Players: Players = cloneref(game:GetService("Players"))
 local CoreGui: CoreGui = cloneref(game:GetService("CoreGui"))
 local HttpService: HttpService = cloneref(game:GetService("HttpService"))
--- Rape A Femboy Simulator
+local Workspace: Workspace = cloneref(game:GetService("Workspace"))
+
 export type DrawingType = "Line" | "Rectangle" | "Circle" | "Triangle" | "Text" | "Image"
 
 export type Properties = { [string]: any }
@@ -60,7 +61,7 @@ local function GetGui(): ScreenGui
 	Gui.ClipToDeviceSafeArea = false
 	Gui.SafeAreaCompatibility = Enum.SafeAreaCompatibility.None
 	Gui.ResetOnSpawn = false
-	Gui.DisplayOrder = 2147483647
+	Gui.DisplayOrder = 2147483646
 	Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 
 	Mount(Gui)
@@ -149,6 +150,7 @@ Classes.Rectangle = {
 		Stroke.Thickness = Data.Thickness
 		Stroke.Color = Data.Color
 		Stroke.Transparency = 1 - Data.Opacity
+		Stroke.LineJoinMode = Data.Rounding > 0 and Enum.LineJoinMode.Round or Enum.LineJoinMode.Miter
 
 		Element.Corner.CornerRadius = UDim.new(0, Data.Rounding)
 	end,
@@ -240,8 +242,10 @@ Classes.Triangle = {
 		local Count = 0
 
 		if Data.Filled then
-			local MinY = math.floor(math.min(Points[1].Y, Points[2].Y, Points[3].Y))
-			local MaxY = math.ceil(math.max(Points[1].Y, Points[2].Y, Points[3].Y))
+			local Camera = Workspace.CurrentCamera
+			local Limit = Camera and Camera.ViewportSize.Y or 4096
+			local MinY = math.max(math.floor(math.min(Points[1].Y, Points[2].Y, Points[3].Y)), 0)
+			local MaxY = math.min(math.ceil(math.max(Points[1].Y, Points[2].Y, Points[3].Y)), math.ceil(Limit))
 
 			for Y = MinY, MaxY do
 				local ScanY = Y + 0.5
@@ -319,7 +323,7 @@ Classes.Text = {
 		Element.TextColor3 = Data.Color
 		Element.TextTransparency = 1 - Data.Opacity
 		Element.TextStrokeColor3 = Data.OutlineColor
-		Element.TextStrokeTransparency = Data.Outline and 0 or 1
+		Element.TextStrokeTransparency = Data.Outline and (1 - Data.Opacity) or 1
 		Element.Visible = Data.Visible
 		Element.ZIndex = Data.ZIndex
 	end,
@@ -387,7 +391,16 @@ function Object.Refresh(Self: Drawing)
 	if rawget(Self, "Removed") then
 		return
 	end
-	rawget(Self, "Class").Render(rawget(Self, "Element"), rawget(Self, "Data"))
+
+	local Element = rawget(Self, "Element")
+	local Data: Properties = rawget(Self, "Data")
+
+	if not Data.Visible then
+		Element.Visible = false
+		return
+	end
+
+	rawget(Self, "Class").Render(Element, Data)
 end
 
 function Object.Set(Self: Drawing, Properties: Properties): Drawing
@@ -457,7 +470,7 @@ function DrawingLibrary.New(Type: DrawingType, Properties: Properties?): Drawing
 	}, Object) :: any
 
 	table.insert(DrawingLibrary.Objects, Self)
-	Class.Render(Element, Data)
+	Object.Refresh(Self)
 
 	return Self
 end
