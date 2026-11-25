@@ -67,18 +67,21 @@ type State = {
 	Tracer: Drawing,
 }
 
-local DrawingLibrary = loadstring(readfile("DrawingLibrary.lua"))() :: Library
+local DrawingLibrary = loadstring(game:HttpGet("https://raw.githubusercontent.com/StyearX/Assets/refs/heads/main/scripts/DrawingLibrary.lua"))() :: Library
 
-local Players = cloneref(game:GetService("Players"))
-local RunService = cloneref(game:GetService("RunService"))
-local Workspace = cloneref(game:GetService("Workspace"))
-local HttpService = cloneref(game:GetService("HttpService"))
+local cloneref = (cloneref or clonereference or function(Instance: any)
+	return Instance
+end)
+local Players: Players = cloneref(game:GetService("Players"))
+local RunService: RunService = cloneref(game:GetService("RunService"))
+local Workspace: Workspaces= cloneref(game:GetService("Workspace"))
+local HttpService: Http = cloneref(game:GetService("HttpService"))
 
 if getgenv().Esp then
 	getgenv().Esp.Unload()
 end
 
-local LocalPlayer = Players.LocalPlayer
+local LocalPlayer: Player = Players.LocalPlayer
 local Camera = Workspace.CurrentCamera :: Camera
 local BindName = HttpService:GenerateGUID(false)
 local Floor = math.floor
