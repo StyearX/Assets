@@ -1,7 +1,10 @@
-local Players = cloneref(game:GetService("Players"))
-local CoreGui = cloneref(game:GetService("CoreGui"))
-local HttpService = cloneref(game:GetService("HttpService"))
-
+local cloneref = (cloneref or clonereference or function(Instance: any)
+	return Instance
+end)
+local Players: Players = cloneref(game:GetService("Players"))
+local CoreGui: CoreGui = cloneref(game:GetService("CoreGui"))
+local HttpService: HttpService = cloneref(game:GetService("HttpService"))
+-- Rape A Femboy Simulator
 export type DrawingType = "Line" | "Rectangle" | "Circle" | "Triangle" | "Text" | "Image"
 
 export type Properties = { [string]: any }
